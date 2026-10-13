@@ -6,6 +6,7 @@
 	import StatusBlock from './StatusBlock.svelte';
 
 	const app = getAppState();
+	let collapsed = $state(false);
 	const items = $derived(app.notifications.status === 'idle' ? undefined : app.notifications.data);
 	const readCount = $derived((items ?? []).filter((item) => item.read).length);
 
@@ -29,6 +30,16 @@
 	<div class="card-header">
 		<h2 id="notifications-heading">Recent changes</h2>
 		<div class="actions">
+			<button
+				type="button"
+				class="btn btn-sm btn-ghost"
+				aria-expanded={!collapsed}
+				aria-controls="notifications-body"
+				aria-label={collapsed ? 'Expand recent changes' : 'Collapse recent changes'}
+				onclick={() => (collapsed = !collapsed)}
+			>
+				<span class="collapse-chevron" class:collapsed><Icon name="chevron" size={16} /></span>
+			</button>
 			{#if app.unreadCount > 0}
 				<span class="badge" data-tone="accent">{app.unreadCount} unread</span>
 				<button type="button" class="btn btn-sm btn-ghost" onclick={() => app.markAllRead()}>
@@ -43,7 +54,7 @@
 			{/if}
 		</div>
 	</div>
-	<div class="card-body">
+	<div class="card-body" id="notifications-body" hidden={collapsed}>
 		{#if app.notifications.status === 'error'}
 			<StatusBlock
 				kind="error"

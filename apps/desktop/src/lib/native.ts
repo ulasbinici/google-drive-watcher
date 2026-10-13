@@ -47,6 +47,11 @@ export function makeLocalDir(path: string): Promise<void> {
 	return invoke('make_dir', { path });
 }
 
+/** Deletes a file or folder inside a sync root. Missing paths are fine. The root itself is refused. */
+export function removeLocal(root: string, relative: string): Promise<void> {
+	return invoke('remove_local', { root, relative });
+}
+
 export function localPathExists(path: string): Promise<boolean> {
 	return invoke<boolean>('path_exists', { path });
 }
@@ -76,6 +81,12 @@ export async function setTrayStatus(text: string): Promise<void> {
 export async function setTrayControls(paused: boolean, hasPairs: boolean): Promise<void> {
 	if (!isTauri()) return;
 	await invoke('set_tray_controls', { paused, hasPairs });
+}
+
+/** Tray label for pausing Drive change notifications. */
+export async function setTrayMonitoring(paused: boolean): Promise<void> {
+	if (!isTauri()) return;
+	await invoke('set_tray_monitoring', { paused });
 }
 
 export async function appVersion(): Promise<string> {

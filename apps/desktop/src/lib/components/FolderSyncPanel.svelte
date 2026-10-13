@@ -9,6 +9,7 @@
 
 	const app = getAppState();
 	const sync = getSyncManager();
+	let collapsed = $state(false);
 	const directions = Object.entries(DIRECTION_LABELS) as [SyncDirection, string][];
 	const running = $derived(sync.runningId !== null);
 
@@ -22,16 +23,28 @@
 <section class="card pin" aria-labelledby="folder-sync-heading">
 	<div class="card-header">
 		<h2 id="folder-sync-heading">Folder sync</h2>
-		{#if sync.pairs.length > 0}
-			<span class="badge" data-tone={sync.paused ? 'warning' : running ? 'accent' : 'neutral'} role="status">
-				{#if running}
-					<Spinner size={12} />
-				{/if}
-				{sync.paused ? 'Paused' : running ? 'Syncing' : `Every ${sync.intervalMinutes} min`}
-			</span>
-		{/if}
+		<div class="card-tools">
+			{#if sync.pairs.length > 0}
+				<span class="badge" data-tone={sync.paused ? 'warning' : running ? 'accent' : 'neutral'} role="status">
+					{#if running}
+						<Spinner size={12} />
+					{/if}
+					{sync.paused ? 'Paused' : running ? 'Syncing' : `Every ${sync.intervalMinutes} min`}
+				</span>
+			{/if}
+			<button
+				type="button"
+				class="btn btn-sm btn-ghost"
+				aria-expanded={!collapsed}
+				aria-controls="folder-sync-body"
+				aria-label={collapsed ? 'Expand folder sync' : 'Collapse folder sync'}
+				onclick={() => (collapsed = !collapsed)}
+			>
+				<span class="collapse-chevron" class:collapsed><Icon name="chevron" size={16} /></span>
+			</button>
+		</div>
 	</div>
-	<div class="card-body">
+	<div class="card-body" id="folder-sync-body" hidden={collapsed}>
 		{#if sync.pairs.length > 0}
 			<div class="controls">
 				<button type="button" class="btn btn-sm" onclick={() => void sync.setPaused(!sync.paused)}>
@@ -131,8 +144,13 @@
 				{/each}
 			</ul>
 			<p class="muted note">
-				Deleting a file on one side does not delete it on the other. Google Docs, Sheets and Slides
-				are skipped.
+				{#if sync.mirrorDeletes}
+					Deletions follow each folder’s direction. Drive copies go to trash. Google Docs, Sheets and
+					Slides are skipped.
+				{:else}
+					Deleting a file on one side does not delete it on the other. Google Docs, Sheets and Slides
+					are skipped.
+				{/if}
 			</p>
 		{/if}
 	</div>

@@ -7,6 +7,7 @@
 	import StatusBlock from './StatusBlock.svelte';
 
 	const app = getAppState();
+	let collapsed = $state(false);
 	const syncData = $derived(app.sync.status === 'idle' ? undefined : app.sync.data);
 	const syncing = $derived(syncData?.state === 'syncing');
 
@@ -41,16 +42,28 @@
 <section class="card pin" aria-labelledby="sync-heading">
 	<div class="card-header">
 		<h2 id="sync-heading">Monitoring</h2>
-		{#if syncData}
-			<span class="badge" data-tone={syncTone(syncData.state)} role="status">
-				{#if syncing}
-					<Spinner size={12} />
-				{/if}
-				{syncLabel[syncData.state]}
-			</span>
-		{/if}
+		<div class="card-tools">
+			{#if syncData}
+				<span class="badge" data-tone={syncTone(syncData.state)} role="status">
+					{#if syncing}
+						<Spinner size={12} />
+					{/if}
+					{syncLabel[syncData.state]}
+				</span>
+			{/if}
+			<button
+				type="button"
+				class="btn btn-sm btn-ghost"
+				aria-expanded={!collapsed}
+				aria-controls="sync-body"
+				aria-label={collapsed ? 'Expand monitoring' : 'Collapse monitoring'}
+				onclick={() => (collapsed = !collapsed)}
+			>
+				<span class="collapse-chevron" class:collapsed><Icon name="chevron" size={16} /></span>
+			</button>
+		</div>
 	</div>
-	<div class="card-body">
+	<div class="card-body" id="sync-body" hidden={collapsed}>
 		<div class="controls">
 			<button
 				type="button"

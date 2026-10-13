@@ -2,7 +2,8 @@ import { createContext } from 'svelte';
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import { invalidateDriveToken } from '$lib/drive/drive-api';
 import { errorMessage } from '$lib/format';
-import { APP_EVENTS, emitAppEvent } from '$lib/native';
+import { APP_EVENTS, emitAppEvent, setTrayMonitoring } from '$lib/native';
+import { requestIncrementalSync } from '$lib/sync/sync-store';
 import type { DriveNotifierBackend, Unsubscribe } from '$lib/services';
 import type {
 	AuthStatus,
@@ -376,6 +377,7 @@ export class AppState {
 		this.monitoring = { status: 'loading', data: dataOf(this.monitoring) };
 		try {
 			this.monitoring = { status: 'ready', data: await this.backend.watch.getMonitoring() };
+			await setTrayMonitoring(this.monitoring.data?.paused === true);
 		} catch (error) {
 			this.monitoring = { status: 'error', error: errorMessage(error) };
 		}
@@ -390,6 +392,7 @@ export class AppState {
 				status: 'ready',
 				data: await this.backend.watch.setMonitoringPaused(paused)
 			};
+			await setTrayMonitoring(paused);
 		} catch (error) {
 			this.monitoringError = errorMessage(error);
 		} finally {
@@ -436,6 +439,7 @@ export class AppState {
 			status: 'ready',
 			data: [notification, ...current].slice(0, NOTIFICATION_LIMIT)
 		};
+		void requestIncrementalSync();
 	}
 
 	#setRead(predicate: (n: DriveNotification) => boolean) {

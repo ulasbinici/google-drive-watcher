@@ -81,6 +81,19 @@
 		min-height: 0;
 	}
 
+	.primary {
+		overflow: hidden;
+	}
+
+	.secondary {
+		overflow-y: auto;
+		overscroll-behavior: contain;
+	}
+
+	.secondary :global(.fill) {
+		flex: none;
+	}
+
 	.banner {
 		grid-column: 1 / -1;
 		margin: 0;
@@ -92,13 +105,9 @@
 	}
 
 	@media (max-width: 900px) {
-		.shell {
-			height: auto;
-			min-height: 100dvh;
-		}
-
 		.workspace {
 			grid-template-columns: 1fr;
+			grid-template-rows: minmax(0, 1.1fr) minmax(0, 1fr);
 			padding: 0.875rem 1rem 1.5rem;
 		}
 	}

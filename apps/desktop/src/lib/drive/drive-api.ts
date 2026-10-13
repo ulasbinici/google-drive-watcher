@@ -371,7 +371,6 @@ export async function listChanges(pageToken: string, driveId: string | null): Pr
 			fields: `nextPageToken,newStartPageToken,changes(fileId,removed,file(${ITEM_FIELDS}))`
 		});
 		if (driveId) params.set('driveId', driveId);
-		else params.set('restrictToMyDrive', 'true');
 		const page = await driveJson<{
 			changes?: Array<{ fileId?: string; removed?: boolean; file?: RawItem }>;
 			nextPageToken?: string;

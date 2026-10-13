@@ -1,19 +1,23 @@
 import {
 	createFolder,
 	downloadBytes,
+	DriveStatusError,
 	driveToken,
 	isExpiredCursor,
 	isGoogleNative,
 	listChanges,
 	listTree,
+	trashItem,
 	uploadBlob,
 	type DriveChange,
 	type DriveItem
 } from '$lib/drive/drive-api';
 import {
 	joinLocalPath,
+	localPathExists,
 	makeLocalDir,
 	readLocalFile,
+	removeLocal,
 	safeLocalName,
 	scanLocalDir,
 	statLocal,
@@ -41,14 +45,48 @@ const PARALLEL_TRANSFERS = 4;
 export interface SyncResult {
 	uploaded: number;
 	downloaded: number;
+	/** Files or folders removed on the other side because mirror deletions is on. */
+	removed: number;
 	skipped: number;
 	failed: number;
 	firstError: string | null;
 	needsEditAccess: boolean;
 	/** True when pause stopped the run before every file was visited. */
 	stopped: boolean;
-	/** Files copied in this run, newest last. Prefixed with ↓ or ↑. */
+	/** Files copied or deleted in this run, newest last. Prefixed with ↓, ↑, or ✕. */
 	files: string[];
+}
+
+export interface SyncRunOptions {
+	/** Delete the other copy when a previously synced file disappears. Default off. */
+	mirrorDeletes?: boolean;
+}
+
+function emptyResult(): SyncResult {
+	return {
+		uploaded: 0,
+		downloaded: 0,
+		removed: 0,
+		skipped: 0,
+		failed: 0,
+		firstError: null,
+		needsEditAccess: false,
+		stopped: false,
+		files: []
+	};
+}
+
+function under(path: string, prefix: string): boolean {
+	return path === prefix || path.startsWith(`${prefix}/`);
+}
+
+async function trashSynced(id: string): Promise<void> {
+	try {
+		await trashItem(id);
+	} catch (error) {
+		if (error instanceof DriveStatusError && error.status === 404) return;
+		throw error;
+	}
 }
 
 function same(a: number, b: number): boolean {
@@ -78,29 +116,23 @@ async function pool<T>(items: T[], limit: number, run: (item: T) => Promise<void
 export async function syncPair(
 	pair: SyncPair,
 	onProgress?: (message: string) => void,
-	shouldStop?: () => boolean
+	shouldStop?: () => boolean,
+	options?: SyncRunOptions
 ): Promise<SyncResult> {
 	const { canEdit } = await driveToken();
 	onProgress?.('Comparing files…');
-	const [localEntries, remoteEntries, previous] = await Promise.all([
+	const [localEntries, remoteEntries, previous, previousIndex] = await Promise.all([
 		scanLocalDir(pair.localPath),
 		listTree(pair.driveFolderId, pair.driveId),
-		loadSyncState(pair.id)
+		loadSyncState(pair.id),
+		loadPairIndex(pair.id)
 	]);
 
-	const result: SyncResult = {
-		uploaded: 0,
-		downloaded: 0,
-		skipped: 0,
-		failed: 0,
-		firstError: null,
-		needsEditAccess: false,
-		stopped: false,
-		files: []
-	};
+	const result = emptyResult();
+	const mirrorDeletes = options?.mirrorDeletes === true;
 
 	const localFiles = new Map<string, LocalEntry>();
-	const localDirs: string[] = [];
+	let localDirs: string[] = [];
 	for (const entry of localEntries) {
 		if (entry.isDir) localDirs.push(entry.path);
 		else localFiles.set(entry.path, entry);
@@ -172,6 +204,81 @@ export async function syncPair(
 		result.files.push(`↓ ${key}`);
 	};
 
+	const noteRemoved = (key: string) => {
+		result.removed++;
+		result.files.push(`✕ ${key}`);
+	};
+
+	if (mirrorDeletes && (await localPathExists(pair.localPath))) {
+		const covered: string[] = [];
+		if (allowUpload && canEdit) {
+			const missingLocal = Object.entries(previousIndex?.folders ?? {})
+				.filter((entry): entry is [string, string] => Boolean(entry[1]) && !localDirs.includes(entry[1]))
+				.sort((a, b) => a[1].length - b[1].length);
+			for (const [id, path] of missingLocal) {
+				if (shouldStop?.()) {
+					result.stopped = true;
+					break;
+				}
+				if (covered.some((prefix) => under(path, prefix))) continue;
+				const remoteEdited = [...remoteFiles.entries()].some(([key, item]) => {
+					if (!under(key, path)) return false;
+					const before = previous[key];
+					const modified = Date.parse(item.modifiedTime ?? '');
+					return !before || !same(modified, before.driveModified);
+				});
+				if (remoteEdited) continue;
+				try {
+					onProgress?.(`Removing ${path} from Drive`);
+					await trashSynced(id);
+					covered.push(path);
+					noteRemoved(path);
+					for (const key of [...remoteFiles.keys()]) {
+						if (under(key, path)) remoteFiles.delete(key);
+					}
+					for (const key of [...remoteFolders.keys()]) {
+						if (under(key, path)) remoteFolders.delete(key);
+					}
+				} catch (error) {
+					result.failed++;
+					result.firstError ??= `${path}: ${error instanceof Error ? error.message : String(error)}`;
+				}
+			}
+		}
+		if (!result.stopped && allowDownload) {
+			const remotePaths = new Set(remoteFolders.keys());
+			const missingRemote = Object.values(previousIndex?.folders ?? {})
+				.filter((path): path is string => Boolean(path) && !remotePaths.has(path))
+				.sort((a, b) => a.length - b.length);
+			for (const path of missingRemote) {
+				if (shouldStop?.()) {
+					result.stopped = true;
+					break;
+				}
+				if (covered.some((prefix) => under(path, prefix))) continue;
+				const localEdited = [...localFiles.entries()].some(([key, local]) => {
+					if (!under(key, path)) return false;
+					const before = previous[key];
+					return !before || !same(local.modified, before.localModified) || local.size !== before.size;
+				});
+				if (localEdited) continue;
+				try {
+					onProgress?.(`Deleting ${path}`);
+					await removeLocal(pair.localPath, path);
+					covered.push(path);
+					noteRemoved(path);
+					for (const key of [...localFiles.keys()]) {
+						if (under(key, path)) localFiles.delete(key);
+					}
+					localDirs = localDirs.filter((key) => !under(key, path));
+				} catch (error) {
+					result.failed++;
+					result.firstError ??= `${path}: ${error instanceof Error ? error.message : String(error)}`;
+				}
+			}
+		}
+	}
+
 	const keys = [...new Set([...localFiles.keys(), ...remoteFiles.keys()])];
 	await pool(keys, PARALLEL_TRANSFERS, async (key) => {
 		if (shouldStop?.()) {
@@ -183,15 +290,30 @@ export async function syncPair(
 		const before = previous[key];
 		try {
 			if (local && !remote) {
-				// Unchanged since the last sync, so it was removed on Drive on purpose: leave it alone.
-				if (before && same(local.modified, before.localModified)) next[key] = before;
-				else if (allowUpload) await upload(key, local);
+				// Unchanged since the last sync, so it was removed on Drive on purpose.
+				if (before && same(local.modified, before.localModified)) {
+					if (mirrorDeletes && allowDownload) {
+						onProgress?.(`Deleting ${key}`);
+						await removeLocal(pair.localPath, key);
+						noteRemoved(key);
+					} else next[key] = before;
+				} else if (allowUpload) await upload(key, local);
 				return;
 			}
 			if (remote && !local) {
 				const driveModified = Date.parse(remote.modifiedTime ?? '');
-				if (before && same(driveModified, before.driveModified)) next[key] = before;
-				else if (allowDownload) await download(key, remote);
+				if (before && same(driveModified, before.driveModified)) {
+					if (mirrorDeletes && allowUpload) {
+						if (!canEdit) {
+							result.needsEditAccess = true;
+							next[key] = before;
+						} else {
+							onProgress?.(`Removing ${key} from Drive`);
+							await trashSynced(remote.id);
+							noteRemoved(key);
+						}
+					} else next[key] = before;
+				} else if (allowDownload) await download(key, remote);
 				return;
 			}
 			if (!local || !remote) return;
@@ -285,7 +407,8 @@ export async function syncDriveChanges(
 	pairs: SyncPair[],
 	dirty: Readonly<Record<string, readonly string[]>>,
 	onProgress?: (pair: SyncPair, message: string) => void,
-	shouldStop?: () => boolean
+	shouldStop?: () => boolean,
+	options?: SyncRunOptions
 ): Promise<DriveSyncOutcome> {
 	if (!pairs.length) return { expired: false, results: [] };
 	const driveId = pairs[0]?.driveId ?? null;
@@ -317,6 +440,7 @@ export async function syncDriveChanges(
 			changes,
 			dirty[pair.id] ?? [],
 			canEdit,
+			options?.mirrorDeletes === true,
 			(message) => onProgress?.(pair, message),
 			shouldStop
 		);
@@ -348,19 +472,11 @@ async function applyIncremental(
 	changes: DriveChange[],
 	dirty: readonly string[],
 	canEdit: boolean,
+	mirrorDeletes: boolean,
 	onProgress?: (message: string) => void,
 	shouldStop?: () => boolean
 ): Promise<SyncResult> {
-	const result: SyncResult = {
-		uploaded: 0,
-		downloaded: 0,
-		skipped: 0,
-		failed: 0,
-		firstError: null,
-		needsEditAccess: false,
-		stopped: false,
-		files: []
-	};
+	const result = emptyResult();
 	const index = await loadPairIndex(pair.id);
 	const previous = await loadSyncState(pair.id);
 	if (!index) return result;
@@ -429,7 +545,24 @@ async function applyIncremental(
 		result.files.push(`↓ ${key}`);
 	};
 
-	const placeFolders = (incoming: DriveChange[]) => {
+	const noteRemoved = (key: string) => {
+		result.removed++;
+		result.files.push(`✕ ${key}`);
+	};
+
+	const forgetTree = (prefix: string) => {
+		for (const key of Object.keys(next)) {
+			if (under(key, prefix)) delete next[key];
+		}
+		for (const [id, path] of Object.entries(folders)) {
+			if (path && under(path, prefix)) {
+				delete folders[id];
+				idByPath.delete(path);
+			}
+		}
+	};
+
+	const placeFolders = async (incoming: DriveChange[]) => {
 		let pending = incoming.filter((change) => change.file?.isFolder && !change.removed);
 		for (let guard = pending.length + 1; pending.length && guard > 0; guard--) {
 			const later: DriveChange[] = [];
@@ -441,23 +574,70 @@ async function applyIncremental(
 					later.push(change);
 					continue;
 				}
-				folders[file.id] = childKey(parent, file.name);
-				idByPath.set(folders[file.id]!, file.id);
+				const key = childKey(parent, file.name);
+				folders[file.id] = key;
+				idByPath.set(key, file.id);
+				if (allowDownload && key) {
+					await makeLocalDir(joinLocalPath(pair.localPath, key)).catch(() => undefined);
+				}
 			}
 			if (later.length === pending.length) break;
 			pending = later;
 		}
 	};
 
-	placeFolders(changes);
+	await placeFolders(changes);
 
 	for (const change of changes) {
 		if (shouldStop?.()) {
 			result.stopped = true;
 			break;
 		}
+		if (change.removed) {
+			if (!mirrorDeletes) continue;
+			const folderPath = folders[change.fileId];
+			const filePath = folderPath
+				? null
+				: Object.entries(next).find(([, record]) => record.driveFileId === change.fileId)?.[0];
+			const key = folderPath || filePath;
+			if (!key || !(await localPathExists(pair.localPath))) continue;
+			try {
+				if (folderPath) {
+					if (!allowDownload) continue;
+					const edited = dirty.some((path) => under(path, key));
+					if (edited) continue;
+					onProgress?.(`Deleting ${key}`);
+					if (await localPathExists(pair.localPath)) await removeLocal(pair.localPath, key);
+					forgetTree(key);
+					noteRemoved(key);
+				} else if (allowDownload) {
+					const before = next[key];
+					const local = await statLocal(pair.localPath, key);
+					if (
+						local &&
+						!local.isDir &&
+						before &&
+						(!same(local.modified, before.localModified) || local.size !== before.size) &&
+						allowUpload
+					) {
+						await upload(key, local);
+					} else {
+						if (local && (await localPathExists(pair.localPath))) {
+							onProgress?.(`Deleting ${key}`);
+							await removeLocal(pair.localPath, key);
+							noteRemoved(key);
+						}
+						delete next[key];
+					}
+				}
+			} catch (error) {
+				result.failed++;
+				result.firstError ??= `${key}: ${error instanceof Error ? error.message : String(error)}`;
+			}
+			continue;
+		}
 		const file = change.file;
-		if (change.removed || !file || file.isFolder) continue;
+		if (!file || file.isFolder) continue;
 		if (isGoogleNative(file)) {
 			result.skipped++;
 			continue;
@@ -513,6 +693,94 @@ async function applyIncremental(
 		}
 	}
 
+	if (!result.stopped && mirrorDeletes && allowUpload && (await localPathExists(pair.localPath))) {
+		const missing = [...dirty].filter(Boolean).sort((a, b) => a.length - b.length);
+		const covered: string[] = [];
+		for (const relative of missing) {
+			if (shouldStop?.()) {
+				result.stopped = true;
+				break;
+			}
+			if (covered.some((prefix) => under(relative, prefix))) continue;
+			const stat = await statLocal(pair.localPath, relative).catch(() => null);
+			if (stat?.isDir) {
+				try {
+					const nested = await scanLocalDir(joinLocalPath(pair.localPath, relative));
+					const present = new Set(
+						nested.filter((entry) => !entry.isDir).map((entry) => `${relative}/${entry.path}`)
+					);
+					const gone = Object.keys(next).filter(
+						(key) => key.startsWith(`${relative}/`) && !present.has(key)
+					);
+					if (!gone.length) continue;
+					if (!canEdit) {
+						result.needsEditAccess = true;
+						continue;
+					}
+					for (const key of gone) {
+						const record = next[key];
+						if (!record) continue;
+						onProgress?.(`Removing ${key} from Drive`);
+						await trashSynced(record.driveFileId);
+						delete next[key];
+						noteRemoved(key);
+					}
+				} catch (error) {
+					result.failed++;
+					result.firstError ??= `${relative}: ${error instanceof Error ? error.message : String(error)}`;
+				}
+				continue;
+			}
+			if (stat) continue;
+			const folderId = idByPath.get(relative);
+			try {
+				if (folderId) {
+					if (!canEdit) {
+						result.needsEditAccess = true;
+						continue;
+					}
+					onProgress?.(`Removing ${relative} from Drive`);
+					await trashSynced(folderId);
+					forgetTree(relative);
+					covered.push(relative);
+					noteRemoved(relative);
+					continue;
+				}
+				const before = next[relative];
+				if (before) {
+					if (!canEdit) {
+						result.needsEditAccess = true;
+						continue;
+					}
+					onProgress?.(`Removing ${relative} from Drive`);
+					await trashSynced(before.driveFileId);
+					delete next[relative];
+					covered.push(relative);
+					noteRemoved(relative);
+					continue;
+				}
+				const children = Object.keys(next).filter((key) => key.startsWith(`${relative}/`));
+				if (!children.length) continue;
+				if (!canEdit) {
+					result.needsEditAccess = true;
+					continue;
+				}
+				for (const key of children) {
+					const record = next[key];
+					if (!record) continue;
+					onProgress?.(`Removing ${key} from Drive`);
+					await trashSynced(record.driveFileId);
+					delete next[key];
+					noteRemoved(key);
+				}
+				covered.push(relative);
+			} catch (error) {
+				result.failed++;
+				result.firstError ??= `${relative}: ${error instanceof Error ? error.message : String(error)}`;
+			}
+		}
+	}
+
 	if (!result.stopped && allowUpload) {
 		for (const relative of dirty) {
 			if (shouldStop?.()) {
@@ -556,6 +824,7 @@ export function describeResult(result: SyncResult): string {
 	const parts: string[] = [];
 	if (result.uploaded) parts.push(`${result.uploaded} uploaded`);
 	if (result.downloaded) parts.push(`${result.downloaded} downloaded`);
+	if (result.removed) parts.push(`${result.removed} deleted`);
 	if (result.failed) parts.push(`${result.failed} failed`);
 	if (result.skipped) parts.push(`${result.skipped} Google Docs skipped`);
 	return parts.length ? parts.join(', ') : 'Up to date';

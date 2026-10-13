@@ -23,6 +23,13 @@
 		});
 	}
 
+	function onMirrorDeletes(event: Event) {
+		const input = event.currentTarget as HTMLInputElement;
+		void sync.setMirrorDeletes(input.checked).finally(() => {
+			input.checked = sync.mirrorDeletes;
+		});
+	}
+
 	function onKeydown(event: KeyboardEvent) {
 		if (event.key === 'Escape' && app.settingsOpen) app.settingsOpen = false;
 	}
@@ -92,6 +99,18 @@
 					Runs while Drive Watch is open. Synced folders are listed under Monitoring. 1 to
 					{MAX_SYNC_INTERVAL_MINUTES} minutes.
 				</p>
+				<label class="option">
+					<input type="checkbox" checked={sync.mirrorDeletes} onchange={onMirrorDeletes} />
+					<span>
+						<strong>Mirror deletions</strong>
+						<span class="muted">
+							Off by default. When on, deleting a file also removes it on the other side. Two-way
+							folders delete both ways. Download-only folders only remove the PC copy. Upload-only
+							folders only remove the Drive copy, and that copy goes to trash. Turning this on also
+							needs “Allow file upload and edit” before a PC delete can reach Drive.
+						</span>
+					</span>
+				</label>
 			</section>
 
 			{#if version}

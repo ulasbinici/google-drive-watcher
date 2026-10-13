@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{
     ipc::{InvokeBody, Request, Response},
     menu::{Menu, MenuItem},
-    tray::TrayIconBuilder,
+    tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, WebviewUrl, WebviewWindowBuilder,
 };
 use tauri_plugin_deep_link::DeepLinkExt;
@@ -23,6 +23,7 @@ struct TrayStatus {
     icon: tauri::tray::TrayIcon,
     label: tauri::menu::MenuItem<tauri::Wry>,
     pause: tauri::menu::MenuItem<tauri::Wry>,
+    monitor: tauri::menu::MenuItem<tauri::Wry>,
     sync_now: tauri::menu::MenuItem<tauri::Wry>,
 }
 
@@ -191,6 +192,42 @@ fn stat_path(root: String, relative: String) -> Result<Option<LocalEntry>, Strin
     entry_at(&root, &relative)
 }
 
+fn path_under(root: &Path, relative: &str) -> Result<PathBuf, String> {
+    if relative.is_empty()
+        || relative
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == "..")
+    {
+        return Err("Invalid relative path".into());
+    }
+    let path = root.join(relative.replace('/', std::path::MAIN_SEPARATOR_STR));
+    if !path.starts_with(root) || path == root {
+        return Err("Path escapes the sync folder".into());
+    }
+    Ok(path)
+}
+
+#[tauri::command]
+fn remove_local(root: String, relative: String) -> Result<(), String> {
+    let root = PathBuf::from(&root);
+    if !root.is_dir() {
+        return Err(format!("Folder not found: {}", root.display()));
+    }
+    let path = path_under(&root, &relative)?;
+    if !path.exists() {
+        return Ok(());
+    }
+    let meta = fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
+    if meta.file_type().is_symlink() {
+        return Err("Refusing to delete a shortcut".into());
+    }
+    if meta.is_dir() {
+        fs::remove_dir_all(&path).map_err(|e| e.to_string())
+    } else {
+        fs::remove_file(&path).map_err(|e| e.to_string())
+    }
+}
+
 #[derive(Deserialize)]
 struct WatchRoot {
     id: String,
@@ -345,6 +382,19 @@ fn set_tray_controls(app: tauri::AppHandle, paused: bool, has_pairs: bool) -> Re
     Ok(())
 }
 
+#[tauri::command]
+fn set_tray_monitoring(app: tauri::AppHandle, paused: bool) -> Result<(), String> {
+    let status = app.state::<TrayStatus>();
+    status
+        .monitor
+        .set_text(if paused {
+            "Resume monitoring"
+        } else {
+            "Pause monitoring"
+        })
+        .map_err(|e| e.to_string())
+}
+
 // Must be async: on Windows, building a webview inside a sync command deadlocks and leaves it blank.
 #[tauri::command]
 async fn open_browser(app: tauri::AppHandle) -> Result<(), String> {
@@ -390,10 +440,12 @@ pub fn run() {
             path_exists,
             scan_dir,
             stat_path,
+            remove_local,
             watch_sync_roots,
             open_browser,
             set_tray_status,
-            set_tray_controls
+            set_tray_controls,
+            set_tray_monitoring
         ])
         .setup(|app| {
             let watch_tx = start_watch_hub(app.handle().clone());
@@ -404,12 +456,22 @@ pub fn run() {
                 MenuItem::with_id(app, "sync-status", "Sync: idle", false, None::<&str>)?;
             let sync_now = MenuItem::with_id(app, "sync-now", "Sync now", false, None::<&str>)?;
             let pause = MenuItem::with_id(app, "toggle-sync", "Pause sync", false, None::<&str>)?;
+            let monitor =
+                MenuItem::with_id(app, "toggle-monitoring", "Pause monitoring", true, None::<&str>)?;
             let show = MenuItem::with_id(app, "show", "Open Drive Watch", true, None::<&str>)?;
             let browse = MenuItem::with_id(app, "browse", "Browse Drive", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(
                 app,
-                &[&sync_status, &sync_now, &pause, &show, &browse, &quit],
+                &[
+                    &sync_status,
+                    &sync_now,
+                    &pause,
+                    &monitor,
+                    &show,
+                    &browse,
+                    &quit,
+                ],
             )?;
 
             let icon = TrayIconBuilder::new()
@@ -417,6 +479,15 @@ pub fn run() {
                 .tooltip("Drive Watch")
                 .menu(&menu)
                 .show_menu_on_left_click(true)
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::DoubleClick {
+                        button: MouseButton::Left,
+                        ..
+                    } = event
+                    {
+                        show_main_window(tray.app_handle());
+                    }
+                })
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "show" => show_main_window(app),
                     "browse" => {
@@ -428,6 +499,9 @@ pub fn run() {
                     "toggle-sync" => {
                         let _ = app.emit("tray-toggle-sync", ());
                     }
+                    "toggle-monitoring" => {
+                        let _ = app.emit("tray-toggle-monitoring", ());
+                    }
                     "quit" => app.exit(0),
                     _ => {}
                 })
@@ -436,6 +510,7 @@ pub fn run() {
                 icon,
                 label: sync_status,
                 pause,
+                monitor,
                 sync_now,
             });
 

@@ -109,8 +109,34 @@ input {
 	font-weight: 650;
 }
 
+.card-tools {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 0.35rem;
+}
+
+.collapse-chevron {
+	display: inline-flex;
+	transform: rotate(90deg);
+	transition: transform 0.15s ease;
+}
+
+.collapse-chevron.collapsed {
+	transform: none;
+}
+
 .card-body {
 	padding: 0 1.125rem 1.125rem;
+}
+
+.card-body[hidden] {
+	display: none !important;
+}
+
+.card.fill:has(.card-body[hidden]) {
+	flex: none;
 }
 
 .muted {

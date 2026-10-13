@@ -29,6 +29,7 @@ export class SyncManager {
 	progress = $state<string | null>(null);
 	paused = $state(false);
 	intervalMinutes = $state(DEFAULT_SYNC_INTERVAL_MINUTES);
+	mirrorDeletes = $state(false);
 	#queue: Array<{ id: string | null; full: boolean }> = [];
 	#dirty: Record<string, string[]> = {};
 	#draining = false;
@@ -44,8 +45,9 @@ export class SyncManager {
 			this.#arm();
 		});
 		const offPairs = listenAppEvent(APP_EVENTS.syncPairsChanged, () => void this.reload());
-		const offRun = listenAppEvent<{ id: string | null } | null>(APP_EVENTS.syncRun, (payload) =>
-			this.request(payload?.id ?? null, true)
+		const offRun = listenAppEvent<{ id: string | null; full?: boolean } | null>(
+			APP_EVENTS.syncRun,
+			(payload) => this.request(payload?.id ?? null, payload?.full === true)
 		);
 		const offDirty = listenAppEvent<{ id: string; paths: string[] }>(APP_EVENTS.localSyncDirty, (payload) => {
 			if (!payload?.id || this.paused) return;
@@ -73,6 +75,10 @@ export class SyncManager {
 	async setIntervalMinutes(minutes: number) {
 		this.intervalMinutes = (await saveSyncSettings({ intervalMinutes: minutes })).intervalMinutes;
 		this.#arm();
+	}
+
+	async setMirrorDeletes(enabled: boolean) {
+		this.mirrorDeletes = (await saveSyncSettings({ mirrorDeletes: enabled })).mirrorDeletes;
 	}
 
 	async reload() {
@@ -148,9 +154,10 @@ export class SyncManager {
 					this.progress = message;
 					void setTrayStatus(`${pair.driveFolderName}: ${message}`).catch(() => undefined);
 				},
-				() => this.#cancel
+				() => this.#cancel,
+				{ mirrorDeletes: this.mirrorDeletes }
 			);
-			if (result.stopped && result.uploaded + result.downloaded + result.failed === 0) {
+			if (result.stopped && result.uploaded + result.downloaded + result.removed + result.failed === 0) {
 				await setTrayStatus('Sync paused').catch(() => undefined);
 				return;
 			}
@@ -206,7 +213,8 @@ export class SyncManager {
 					this.progress = message;
 					void setTrayStatus(`${pair.driveFolderName}: ${message}`).catch(() => undefined);
 				},
-				() => this.#cancel
+				() => this.#cancel,
+				{ mirrorDeletes: this.mirrorDeletes }
 			);
 			if (outcome.expired) {
 				await clearDriveCursor(driveId);
@@ -227,7 +235,7 @@ export class SyncManager {
 	}
 
 	async #publish(pair: SyncPair, result: SyncResult) {
-		if (result.stopped && result.uploaded + result.downloaded + result.failed === 0) {
+		if (result.stopped && result.uploaded + result.downloaded + result.removed + result.failed === 0) {
 			await setTrayStatus('Sync paused').catch(() => undefined);
 			return;
 		}
@@ -266,6 +274,7 @@ export class SyncManager {
 			this.paused = settings.paused;
 			this.#cancel = settings.paused;
 			this.intervalMinutes = settings.intervalMinutes;
+			this.mirrorDeletes = settings.mirrorDeletes;
 		}
 		await this.reload();
 	}
@@ -287,7 +296,7 @@ function syncNotice(
 	folderName: string,
 	result: SyncResult
 ): { title: string; body: string } | null {
-	const changed = result.uploaded + result.downloaded;
+	const changed = result.uploaded + result.downloaded + result.removed;
 	if (changed === 0 && result.failed === 0) return null;
 	const lines = result.files.slice(0, NOTICE_FILES);
 	if (result.files.length > NOTICE_FILES) {

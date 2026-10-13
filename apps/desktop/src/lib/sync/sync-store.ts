@@ -48,6 +48,8 @@ export const MAX_SYNC_INTERVAL_MINUTES = 24 * 60;
 export interface SyncSettings {
 	paused: boolean;
 	intervalMinutes: number;
+	/** When on, a delete follows the folder direction and removes the copy on the other side. */
+	mirrorDeletes: boolean;
 }
 
 export function clampIntervalMinutes(value: number): number {
@@ -83,7 +85,7 @@ function stateStore() {
 }
 
 function defaultSettings(): SyncSettings {
-	return { paused: false, intervalMinutes: DEFAULT_SYNC_INTERVAL_MINUTES };
+	return { paused: false, intervalMinutes: DEFAULT_SYNC_INTERVAL_MINUTES, mirrorDeletes: false };
 }
 
 export async function loadSyncSettings(): Promise<SyncSettings> {
@@ -94,7 +96,8 @@ export async function loadSyncSettings(): Promise<SyncSettings> {
 		const parsed = JSON.parse(raw) as Partial<SyncSettings>;
 		return {
 			paused: parsed.paused === true,
-			intervalMinutes: clampIntervalMinutes(Number(parsed.intervalMinutes))
+			intervalMinutes: clampIntervalMinutes(Number(parsed.intervalMinutes)),
+			mirrorDeletes: parsed.mirrorDeletes === true
 		};
 	}
 	const store = await pairsStore();
@@ -104,7 +107,8 @@ export async function loadSyncSettings(): Promise<SyncSettings> {
 	const saved = await store.get<Partial<SyncSettings>>(SETTINGS_KEY);
 	return {
 		paused: saved?.paused === true,
-		intervalMinutes: clampIntervalMinutes(Number(saved?.intervalMinutes))
+		intervalMinutes: clampIntervalMinutes(Number(saved?.intervalMinutes)),
+		mirrorDeletes: saved?.mirrorDeletes === true
 	};
 }
 
@@ -217,7 +221,8 @@ export interface DriveCursor {
 }
 
 function driveCursorKey(driveId: string | null): string {
-	return `cursor:${driveId ?? 'my-drive'}`;
+	// v2 includes "Shared with me" in the user's change stream.
+	return `cursor-v2:${driveId ?? 'user-drive'}`;
 }
 
 function pairIndexKey(id: string): string {
@@ -258,5 +263,10 @@ export async function clearDriveCursor(driveId: string | null): Promise<void> {
 }
 
 export async function requestSyncRun(id?: string): Promise<void> {
-	await emitAppEvent(APP_EVENTS.syncRun, { id: id ?? null });
+	await emitAppEvent(APP_EVENTS.syncRun, { id: id ?? null, full: true });
+}
+
+/** Incremental folder sync. Used when a Drive notification arrives. */
+export async function requestIncrementalSync(): Promise<void> {
+	await emitAppEvent(APP_EVENTS.syncRun, { id: null, full: false });
 }
