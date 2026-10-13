@@ -1,0 +1,15 @@
+node_modules/
+.pnpm-store/
+.env
+.env.*
+!.env.example
+dist/
+build/
+.svelte-kit/
+target/
+apps/desktop/installers/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+.firebase/
+*.local

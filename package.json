@@ -1,0 +1,24 @@
+{
+  "name": "google-drive-notify",
+  "version": "1.0.4",
+  "private": true,
+  "packageManager": "pnpm@10.30.3",
+  "scripts": {
+    "build": "pnpm -r build",
+    "check": "pnpm -r check",
+    "test": "pnpm -r test",
+    "dev:desktop": "pnpm --filter @drive-watch/desktop dev",
+    "build:windows:setup": "pnpm tauri:windows nsis,msi && pnpm copy:installers",
+    "build:windows:msi": "pnpm tauri:windows msi && pnpm copy:installers",
+    "build:windows:nsis": "pnpm tauri:windows nsis && pnpm copy:installers",
+    "tauri:windows": "set \"PATH=%USERPROFILE%\\.cargo\\bin;%PATH%\" && pnpm --filter @drive-watch/desktop tauri build --bundles",
+    "copy:installers": "node scripts/copy-installers.mjs",
+    "dev:functions": "pnpm --filter @drive-watch/functions dev",
+    "emulators": "firebase emulators:start",
+    "deploy:functions": "firebase deploy --only functions,firestore"
+  },
+  "devDependencies": {
+    "firebase-tools": "^14.18.0",
+    "typescript": "^6.0.3"
+  }
+}

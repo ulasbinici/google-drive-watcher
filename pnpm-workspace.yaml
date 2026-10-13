@@ -1,0 +1,8 @@
+packages:
+  - apps/*
+  - functions
+  - packages/*
+
+onlyBuiltDependencies:
+  - esbuild
+  - protobufjs
