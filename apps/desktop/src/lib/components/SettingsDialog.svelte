@@ -1,14 +1,20 @@
 <script lang="ts">
-	import { formatRelative } from '$lib/format';
-	import { openBrowseWindow, revealLocalPath } from '$lib/native';
+	import { appVersion } from '$lib/native';
 	import { getAppState } from '$lib/state/app-state.svelte';
 	import { getSyncManager } from '$lib/sync/sync-manager.svelte';
-	import { DIRECTION_LABELS, type SyncDirection } from '$lib/sync/sync-store';
-	import Spinner from './Spinner.svelte';
+	import { MAX_SYNC_INTERVAL_MINUTES, MIN_SYNC_INTERVAL_MINUTES } from '$lib/sync/sync-store';
 
 	const app = getAppState();
 	const sync = getSyncManager();
-	const directions = Object.entries(DIRECTION_LABELS) as [SyncDirection, string][];
+	let version = $state('');
+
+	void appVersion()
+		.then((value) => {
+			version = value;
+		})
+		.catch(() => {
+			version = '';
+		});
 
 	function onToggle(event: Event) {
 		const input = event.currentTarget as HTMLInputElement;
@@ -65,97 +71,32 @@
 			</section>
 
 			<section class="block">
-				<div class="block-head">
-					<h3>Synced folders</h3>
-					{#if sync.pairs.length > 0}
-						<button
-							type="button"
-							class="btn btn-sm"
-							disabled={sync.runningId !== null}
-							onclick={() => sync.request(null)}
-						>
-							Sync all now
-						</button>
-					{/if}
-				</div>
-				{#if sync.pairs.length === 0}
-					<p class="muted empty">
-						No synced folders yet. In
-						<button type="button" class="link" onclick={() => void openBrowseWindow()}>Browse</button>,
-						right-click a folder and choose <strong>Sync with a local folder</strong>.
-					</p>
-				{:else}
-					<ul class="pairs">
-						{#each sync.pairs as pair (pair.id)}
-							{@const running = sync.runningId === pair.id}
-							<li class="pair">
-								<div class="paths">
-									<span class="drive" title={pair.drivePath}>{pair.drivePath}</span>
-									<span class="arrow" aria-hidden="true">
-										{pair.direction === 'two-way' ? '⇄' : pair.direction === 'download' ? '→' : '←'}
-									</span>
-									<span class="local" title={pair.localPath}>{pair.localPath}</span>
-								</div>
-								<div class="pair-controls">
-									<label class="visually-hidden" for="direction-{pair.id}">Sync direction</label>
-									<select
-										id="direction-{pair.id}"
-										value={pair.direction}
-										disabled={running}
-										onchange={(event) =>
-											void sync.setDirection(pair, event.currentTarget.value as SyncDirection)}
-									>
-										{#each directions as [value, label] (value)}
-											<option {value}>{label}</option>
-										{/each}
-									</select>
-									<button
-										type="button"
-										class="btn btn-sm"
-										disabled={sync.runningId !== null}
-										onclick={() => sync.request(pair.id)}
-									>
-										Sync now
-									</button>
-									<button
-										type="button"
-										class="btn btn-sm btn-ghost"
-										onclick={() => void revealLocalPath(pair.localPath)}
-									>
-										Show folder
-									</button>
-									<button
-										type="button"
-										class="btn btn-sm btn-ghost danger"
-										disabled={running}
-										onclick={() => void sync.remove(pair.id)}
-									>
-										Remove
-									</button>
-								</div>
-								<p class="muted pair-status">
-									{#if running}
-										<Spinner size={12} />
-										{sync.progress ?? 'Syncing…'}
-									{:else if pair.lastSyncAt}
-										Last sync {formatRelative(pair.lastSyncAt, app.now)}
-										{#if pair.lastSummary}· {pair.lastSummary}{/if}
-									{:else}
-										Waiting for first sync
-									{/if}
-								</p>
-								{#if pair.lastError && !running}
-									<p class="error pair-error">{pair.lastError}</p>
-								{/if}
-							</li>
-						{/each}
-					</ul>
-					<p class="muted note">
-						Syncs run every 5 minutes while Drive Watch is open. Deleting a file on one side does not
-						delete it on the other. Google Docs, Sheets and Slides are skipped.
-					</p>
-				{/if}
+				<h3>Folder sync</h3>
+				<label class="interval">
+					<span>Sync every</span>
+					<input
+						type="number"
+						min={MIN_SYNC_INTERVAL_MINUTES}
+						max={MAX_SYNC_INTERVAL_MINUTES}
+						value={sync.intervalMinutes}
+						onchange={(event) => {
+							const input = event.currentTarget;
+							void sync.setIntervalMinutes(Number(input.value)).then(() => {
+								input.value = String(sync.intervalMinutes);
+							});
+						}}
+					/>
+					<span>minutes</span>
+				</label>
+				<p class="muted note">
+					Runs while Drive Watch is open. Synced folders are listed under Monitoring. 1 to
+					{MAX_SYNC_INTERVAL_MINUTES} minutes.
+				</p>
 			</section>
+
+			{#if version}
+				<p class="muted version">Drive Watch {version}</p>
+			{/if}
 		</div>
 	</div>
 {/if}
@@ -194,8 +135,7 @@
 		box-shadow: var(--shadow);
 	}
 
-	.heading,
-	.block-head {
+	.heading {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
@@ -232,72 +172,22 @@
 	}
 
 	.option .muted,
-	.empty,
 	.note,
-	.status {
+	.status,
+	.version {
 		font-size: 0.85rem;
 	}
 
-	.link {
-		padding: 0;
-		border: 0;
-		background: none;
-		color: var(--accent);
-		cursor: pointer;
-		text-decoration: underline;
-	}
-
-	.pairs {
-		display: flex;
-		flex-direction: column;
-		gap: 0.55rem;
-		margin: 0;
-		padding: 0;
-		list-style: none;
-	}
-
-	.pair {
-		display: flex;
-		flex-direction: column;
-		gap: 0.45rem;
-		padding: 0.7rem 0.8rem;
-		border: 1px solid var(--border);
-		border-radius: var(--radius-sm);
-		background: var(--surface-2);
-	}
-
-	.paths {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-		align-items: center;
-		gap: 0.6rem;
-		font-size: 0.86rem;
-	}
-
-	.drive,
-	.local {
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.drive {
-		font-weight: 600;
-	}
-
-	.arrow {
-		color: var(--accent);
-		font-size: 1rem;
-	}
-
-	.pair-controls {
+	.interval {
 		display: flex;
 		flex-wrap: wrap;
 		align-items: center;
-		gap: 0.35rem;
+		gap: 0.45rem;
+		font-size: 0.9rem;
 	}
 
-	select {
+	.interval input {
+		width: 5rem;
 		min-height: 1.875rem;
 		padding: 0.15rem 0.5rem;
 		border: 1px solid var(--border);
@@ -305,18 +195,14 @@
 		background: var(--surface);
 		color: var(--text);
 		font: inherit;
-		font-size: 0.82rem;
 	}
 
-	.danger {
-		color: var(--danger);
+	.note {
+		margin: 0;
 	}
 
-	.pair-status {
-		display: flex;
-		align-items: center;
-		gap: 0.35rem;
-		font-size: 0.8rem;
+	.version {
+		margin: 0;
 	}
 
 	.error {

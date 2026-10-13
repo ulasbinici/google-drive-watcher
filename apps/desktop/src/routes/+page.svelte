@@ -5,6 +5,7 @@
 	import SelectionBar from '$lib/components/SelectionBar.svelte';
 	import SignInPanel from '$lib/components/SignInPanel.svelte';
 	import StatusBlock from '$lib/components/StatusBlock.svelte';
+	import FolderSyncPanel from '$lib/components/FolderSyncPanel.svelte';
 	import SyncStatus from '$lib/components/SyncStatus.svelte';
 	import { getAppState } from '$lib/state/app-state.svelte';
 
@@ -37,6 +38,7 @@
 			</div>
 			<div class="secondary">
 				<SyncStatus />
+				<FolderSyncPanel />
 				<NotificationList />
 			</div>
 		</main>

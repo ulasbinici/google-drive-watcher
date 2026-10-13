@@ -144,15 +144,35 @@ export async function canEditDrive(): Promise<boolean> {
 	return (await driveToken()).canEdit;
 }
 
-async function googleError(response: Response): Promise<Error> {
+export class DriveStatusError extends Error {
+	readonly status: number;
+
+	constructor(status: number, message: string) {
+		super(message);
+		this.name = 'DriveStatusError';
+		this.status = status;
+	}
+}
+
+export function isExpiredCursor(error: unknown): boolean {
+	return error instanceof DriveStatusError && error.status === 410;
+}
+
+async function googleError(response: Response): Promise<DriveStatusError> {
 	const body = (await response.json().catch(() => null)) as {
 		error?: { message?: string; errors?: Array<{ reason?: string }> };
 	} | null;
 	const reason = body?.error?.errors?.[0]?.reason;
 	if (response.status === 403 && reason === 'insufficientPermissions') {
-		return new Error('Turn on “Allow file upload and edit” in Settings to change files.');
+		return new DriveStatusError(
+			response.status,
+			'Turn on “Allow file upload and edit” in Settings to change files.'
+		);
 	}
-	return new Error(body?.error?.message ?? `Google Drive request failed (${response.status})`);
+	return new DriveStatusError(
+		response.status,
+		body?.error?.message ?? `Google Drive request failed (${response.status})`
+	);
 }
 
 async function driveFetch(url: string, init: RequestInit = {}, retry = true): Promise<Response> {
@@ -314,6 +334,64 @@ export async function listTree(folderId: string, driveId: string | null): Promis
 	};
 	await walk(folderId, '');
 	return out;
+}
+
+export interface DriveChange {
+	fileId: string;
+	removed: boolean;
+	file: DriveItem | null;
+}
+
+export interface ChangePage {
+	changes: DriveChange[];
+	/** Token to store. Covers every change returned in this page. */
+	pageToken: string;
+}
+
+/** Page token for changes that happen after this call. One token per My Drive or shared drive. */
+export async function startChangeToken(driveId: string | null): Promise<string> {
+	const params = new URLSearchParams({ supportsAllDrives: 'true' });
+	if (driveId) params.set('driveId', driveId);
+	const page = await driveJson<{ startPageToken?: string }>(`${API}/changes/startPageToken?${params}`);
+	if (!page.startPageToken) throw new Error('Drive did not return a start page token');
+	return page.startPageToken;
+}
+
+/** Every change since `pageToken`. Throws {@link DriveStatusError} with status 410 when the token is too old. */
+export async function listChanges(pageToken: string, driveId: string | null): Promise<ChangePage> {
+	const changes: DriveChange[] = [];
+	let token = pageToken;
+	for (;;) {
+		const params = new URLSearchParams({
+			pageToken: token,
+			pageSize: '1000',
+			supportsAllDrives: 'true',
+			includeItemsFromAllDrives: 'true',
+			includeRemoved: 'true',
+			fields: `nextPageToken,newStartPageToken,changes(fileId,removed,file(${ITEM_FIELDS}))`
+		});
+		if (driveId) params.set('driveId', driveId);
+		else params.set('restrictToMyDrive', 'true');
+		const page = await driveJson<{
+			changes?: Array<{ fileId?: string; removed?: boolean; file?: RawItem }>;
+			nextPageToken?: string;
+			newStartPageToken?: string;
+		}>(`${API}/changes?${params}`);
+		for (const change of page.changes ?? []) {
+			if (!change.fileId) continue;
+			changes.push({
+				fileId: change.fileId,
+				removed: change.removed === true || change.file?.trashed === true,
+				file: change.file ? toItem(change.file) : null
+			});
+		}
+		if (page.nextPageToken) {
+			token = page.nextPageToken;
+			continue;
+		}
+		if (!page.newStartPageToken) throw new Error('Drive did not return a new change token');
+		return { changes, pageToken: page.newStartPageToken };
+	}
 }
 
 function withSuffix(name: string, n: number): string {

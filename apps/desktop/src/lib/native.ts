@@ -55,10 +55,36 @@ export function scanLocalDir(path: string): Promise<LocalEntry[]> {
 	return invoke<LocalEntry[]>('scan_dir', { path });
 }
 
+/** One file or folder under `root`, or null when it is gone. `relative` is `/`-separated. */
+export function statLocal(root: string, relative: string): Promise<LocalEntry | null> {
+	return invoke<LocalEntry | null>('stat_path', { root, relative });
+}
+
+/** Replace the set of folders the local watcher follows. Same API on macOS and Windows. */
+export async function watchSyncRoots(roots: Array<{ id: string; path: string }>): Promise<void> {
+	if (!isTauri()) return;
+	await invoke('watch_sync_roots', { roots });
+}
+
 /** Tray tooltip and the first menu line. Hover or click the tray icon to read it. */
 export async function setTrayStatus(text: string): Promise<void> {
 	if (!isTauri()) return;
 	await invoke('set_tray_status', { text });
+}
+
+/** Enables tray Sync now / Pause sync once a folder pair exists. */
+export async function setTrayControls(paused: boolean, hasPairs: boolean): Promise<void> {
+	if (!isTauri()) return;
+	await invoke('set_tray_controls', { paused, hasPairs });
+}
+
+export async function appVersion(): Promise<string> {
+	if (!isTauri()) {
+		const { version } = await import('../../package.json');
+		return version;
+	}
+	const { getVersion } = await import('@tauri-apps/api/app');
+	return getVersion();
 }
 
 export async function openBrowseWindow(): Promise<void> {
@@ -131,5 +157,6 @@ export function joinLocalPath(base: string, relative: string): string {
 export const APP_EVENTS = {
 	syncPairsChanged: 'sync-pairs-changed',
 	syncRun: 'sync-run',
-	fileEditsChanged: 'file-edits-changed'
+	fileEditsChanged: 'file-edits-changed',
+	localSyncDirty: 'local-sync-dirty'
 } as const;

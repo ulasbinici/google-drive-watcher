@@ -25,26 +25,37 @@
 		// Subscribe during init. start() writes state, so it must not run inside an effect.
 		const stop = app.start();
 		const stopSync = sync.start();
-		const stopTray = listenForTrayToggle(app);
+		const stopTray = listenForTray(app, sync);
 
 		$effect(() => stop);
 		$effect(() => stopSync);
 		$effect(() => stopTray);
 	}
 
-	function listenForTrayToggle(state: AppState): () => void {
-		let unlisten: (() => void) | undefined;
+	function listenForTray(state: AppState, sync: SyncManager): () => void {
+		const unlistens: Array<() => void> = [];
 		let cancelled = false;
 
 		void (async () => {
 			try {
 				const { listen } = await import('@tauri-apps/api/event');
 				if (cancelled) return;
-				const off = await listen('tray-toggle-monitoring', () => {
-					void state.setPaused(!state.isPaused);
-				});
-				if (cancelled) off();
-				else unlisten = off;
+				const offs = await Promise.all([
+					listen('tray-toggle-monitoring', () => {
+						void state.setPaused(!state.isPaused);
+					}),
+					listen('tray-toggle-sync', () => {
+						void sync.setPaused(!sync.paused);
+					}),
+					listen('tray-sync-now', () => {
+						sync.request(null, true);
+					})
+				]);
+				if (cancelled) {
+					for (const off of offs) off();
+					return;
+				}
+				unlistens.push(...offs);
 			} catch {
 				// Browser dev, or the Tauri event API failed to load.
 			}
@@ -52,8 +63,8 @@
 
 		return () => {
 			cancelled = true;
-			unlisten?.();
-			unlisten = undefined;
+			for (const off of unlistens) off();
+			unlistens.length = 0;
 		};
 	}
 </script>
