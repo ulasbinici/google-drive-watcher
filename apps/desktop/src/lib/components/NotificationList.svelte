@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { tick } from 'svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 	import { CHANGE_LABELS, formatDateTime, formatRelative } from '$lib/format';
 	import { getAppState } from '$lib/state/app-state.svelte';
 	import type { ChangeType, NotificationView } from '$lib/types';
@@ -18,6 +19,31 @@
 
 	const items = $derived(app.notifications.status === 'idle' ? undefined : app.notifications.data);
 	const readCount = $derived((items ?? []).filter((item) => item.read && !item.pinned).length);
+	const pinnedItems = $derived((items ?? []).filter((item) => item.pinned));
+	const otherItems = $derived((items ?? []).filter((item) => !item.pinned));
+
+	const EXPANDED_KEY = 'drive-watch-pinned-expanded';
+	const expandedPins = new SvelteSet<string>(readExpanded());
+
+	function readExpanded(): string[] {
+		try {
+			const raw = localStorage.getItem(EXPANDED_KEY);
+			const parsed: unknown = raw ? JSON.parse(raw) : [];
+			return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : [];
+		} catch {
+			return [];
+		}
+	}
+
+	function toggleExpanded(id: string) {
+		if (expandedPins.has(id)) expandedPins.delete(id);
+		else expandedPins.add(id);
+		try {
+			localStorage.setItem(EXPANDED_KEY, JSON.stringify([...expandedPins]));
+		} catch {
+			// Storage can be unavailable; the toggle still works for this session.
+		}
+	}
 
 	function openNote(notification: NotificationView, trigger: HTMLButtonElement) {
 		editingId = notification.id;
@@ -120,105 +146,141 @@
 				message="New files and edits in watched folders will show up here."
 			/>
 		{:else}
-			<ul class="list">
-				{#each items as notification (notification.id)}
-					<li class={{ unread: !notification.read }}>
-						<article aria-labelledby="note-{notification.id}">
-							<div class="top">
-								<span class="badge" data-tone={tone[notification.changeType]}>
-									{CHANGE_LABELS[notification.changeType]}
-								</span>
-								<div class="row-end">
-									<time
-										datetime={notification.occurredAt}
-										title={formatDateTime(notification.occurredAt)}
-									>
-										{formatRelative(notification.occurredAt, app.now)}
-									</time>
-									<button
-										type="button"
-										class={['icon-btn', { active: notification.pinned }]}
-										aria-pressed={notification.pinned}
-										title={notification.pinned ? 'Unpin' : 'Pin'}
-										aria-label={notification.pinned
-											? `Unpin ${notification.fileName}`
-											: `Pin ${notification.fileName}`}
-										onclick={() => app.setNotificationPinned(notification.id, !notification.pinned)}
-									>
-										<Icon name="pin" size={15} />
-									</button>
-									<button
-										type="button"
-										class="icon-btn"
-										title={notification.note ? 'Edit note' : 'Add note'}
-										aria-label={notification.note
-											? `Edit note for ${notification.fileName}`
-											: `Add note for ${notification.fileName}`}
-										onclick={(event) => {
-											const trigger = event.currentTarget;
-											if (trigger instanceof HTMLButtonElement) openNote(notification, trigger);
-										}}
-									>
-										<Icon name={notification.note ? 'edit-note' : 'note'} size={15} />
-									</button>
-								</div>
-							</div>
-							<h3 id="note-{notification.id}">
-								<Icon name="file" size={15} />
-								{notification.fileName}
-							</h3>
-							<p class="muted detail">
-								{notification.folderName}
-								<span aria-hidden="true"> · </span>
-								{notification.driveName}
-							</p>
-							{#if notification.note}
-								<p class="user-note">{notification.note}</p>
-							{/if}
-							<dl class="meta">
-								{#if notification.actorName}
-									<dt>Changed by</dt>
-									<dd>{notification.actorName}</dd>
-								{/if}
-								{#if notification.ownerName}
-									<dt>Owner</dt>
-									<dd>{notification.ownerName}</dd>
-								{/if}
-								<dt>When</dt>
-								<dd>{formatDateTime(notification.occurredAt)}</dd>
-							</dl>
-							<div class="note-actions">
-								{#if !notification.read}
-									<button
-										type="button"
-										class="btn btn-sm btn-ghost"
-										onclick={() => app.markRead(notification.id)}
-									>
-										Mark read
-									</button>
-								{/if}
-								{#if notification.webViewLink}
-									<a
-										class="btn btn-sm btn-ghost"
-										href={notification.webViewLink}
-										target="_blank"
-										rel="noopener noreferrer external"
-										onclick={(event) => openExternal(event, notification.webViewLink!)}
-									>
-										Open file
-									</a>
-								{/if}
-							</div>
-						</article>
-					</li>
-				{/each}
-			</ul>
+			{#if pinnedItems.length}
+				<ul class="list pinned" aria-label="Pinned changes">
+					{#each pinnedItems as notification (notification.id)}
+						{@render row(notification)}
+					{/each}
+				</ul>
+			{/if}
+			{#if otherItems.length}
+				<ul class="list scroll">
+					{#each otherItems as notification (notification.id)}
+						{@render row(notification)}
+					{/each}
+				</ul>
+			{/if}
 			{#if app.notifications.status === 'loading'}
 				<StatusBlock compact kind="loading" title="Refreshing notifications" />
 			{/if}
 		{/if}
 	</div>
 </section>
+
+{#snippet row(notification: NotificationView)}
+	{@const compact = !expandedPins.has(notification.id)}
+	<li class={{ unread: !notification.read, compact }}>
+		<article>
+			<button
+				type="button"
+				class="summary"
+				aria-expanded={!compact}
+				aria-label={compact
+					? `Expand ${notification.fileName}`
+					: `Collapse ${notification.fileName}`}
+				onclick={() => toggleExpanded(notification.id)}
+			>
+				<div class="top">
+					<div class="badges">
+						<span class="badge" data-tone={tone[notification.changeType]}>
+							{CHANGE_LABELS[notification.changeType]}
+						</span>
+						{#if compact && notification.note}
+							<span class="badge note-badge" title={notification.note}>{notification.note}</span>
+						{/if}
+					</div>
+					<span class="row-end">
+						<time
+							datetime={notification.occurredAt}
+							title={formatDateTime(notification.occurredAt)}
+						>
+							{formatRelative(notification.occurredAt, app.now)}
+						</time>
+						<span class={['collapse-chevron', { collapsed: compact }]}>
+							<Icon name="chevron" size={15} />
+						</span>
+					</span>
+				</div>
+				<span class="file-title">
+					<Icon name="file" size={15} />
+					<span class="file-name">{notification.fileName}</span>
+				</span>
+			</button>
+			<div class="row-actions">
+				<button
+					type="button"
+					class={['icon-btn', { active: notification.pinned }]}
+					aria-pressed={notification.pinned}
+					title={notification.pinned ? 'Unpin' : 'Pin'}
+					aria-label={notification.pinned
+						? `Unpin ${notification.fileName}`
+						: `Pin ${notification.fileName}`}
+					onclick={() => app.setNotificationPinned(notification.id, !notification.pinned)}
+				>
+					<Icon name="pin" size={15} />
+				</button>
+				<button
+					type="button"
+					class="icon-btn"
+					title={notification.note ? 'Edit note' : 'Add note'}
+					aria-label={notification.note
+						? `Edit note for ${notification.fileName}`
+						: `Add note for ${notification.fileName}`}
+					onclick={(event) => {
+						const trigger = event.currentTarget;
+						if (trigger instanceof HTMLButtonElement) openNote(notification, trigger);
+					}}
+				>
+					<Icon name={notification.note ? 'edit-note' : 'note'} size={15} />
+				</button>
+			</div>
+			{#if !compact}
+				<p class="muted detail">
+					{notification.folderName}
+					<span aria-hidden="true"> · </span>
+					{notification.driveName}
+				</p>
+				{#if notification.note}
+					<p class="user-note">{notification.note}</p>
+				{/if}
+				<dl class="meta">
+					{#if notification.actorName}
+						<dt>Changed by</dt>
+						<dd>{notification.actorName}</dd>
+					{/if}
+					{#if notification.ownerName}
+						<dt>Owner</dt>
+						<dd>{notification.ownerName}</dd>
+					{/if}
+					<dt>When</dt>
+					<dd>{formatDateTime(notification.occurredAt)}</dd>
+				</dl>
+				<div class="note-actions">
+					{#if !notification.read}
+						<button
+							type="button"
+							class="btn btn-sm btn-ghost"
+							onclick={() => app.markRead(notification.id)}
+						>
+							Mark read
+						</button>
+					{/if}
+					{#if notification.webViewLink}
+						<a
+							class="btn btn-sm btn-ghost"
+							href={notification.webViewLink}
+							target="_blank"
+							rel="noopener noreferrer external"
+							onclick={(event) => openExternal(event, notification.webViewLink!)}
+						>
+							Open file
+						</a>
+					{/if}
+				</div>
+			{/if}
+		</article>
+	</li>
+{/snippet}
 
 {#if editingId}
 	<div class="backdrop">
@@ -275,14 +337,29 @@
 
 	.list {
 		display: flex;
-		flex: 1;
 		flex-direction: column;
 		gap: 0.45rem;
-		min-height: 8rem;
 		margin: 0;
 		padding: 0;
-		overflow: auto;
 		list-style: none;
+	}
+
+	.list > li {
+		flex-shrink: 0;
+	}
+
+	.list.pinned {
+		flex: none;
+		padding-bottom: 0.6rem;
+		margin-bottom: 0.6rem;
+		border-bottom: 1px solid var(--border);
+	}
+
+	.list.scroll {
+		flex: 1;
+		min-height: 8rem;
+		overflow-y: auto;
+		overscroll-behavior: contain;
 	}
 
 	@media (max-width: 900px) {
@@ -293,10 +370,23 @@
 	}
 
 	article {
+		position: relative;
 		padding: 0.65rem 0.7rem;
 		border: 1px solid var(--border);
 		border-radius: var(--radius-sm);
 		background: var(--surface);
+	}
+
+	.summary {
+		display: block;
+		width: 100%;
+		padding: 0;
+		border: 0;
+		background: transparent;
+		color: inherit;
+		font: inherit;
+		text-align: left;
+		cursor: pointer;
 	}
 
 	.unread article {
@@ -311,14 +401,54 @@
 		gap: 0.5rem;
 	}
 
+	.badges {
+		display: flex;
+		align-items: center;
+		gap: 0.35rem;
+		min-width: 0;
+	}
+
+	.note-badge {
+		display: inline-block;
+		max-width: 16rem;
+		overflow: hidden;
+		background: var(--surface-2);
+		color: var(--text);
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.compact article {
+		padding: 0.45rem 0.7rem;
+	}
+
+	.compact .file-title {
+		margin-top: 0.2rem;
+	}
+
+	.file-name {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
 	.row-end {
 		display: flex;
 		align-items: center;
 		gap: 0.15rem;
 		min-width: 0;
+		margin-right: 3.6rem;
 	}
 
-	.row-end .icon-btn {
+	.row-actions {
+		position: absolute;
+		top: 0.4rem;
+		right: 0.4rem;
+		display: flex;
+		align-items: center;
+	}
+
+	.row-actions .icon-btn {
 		width: 1.75rem;
 		height: 1.75rem;
 	}
@@ -344,9 +474,10 @@
 		white-space: nowrap;
 	}
 
-	h3 {
+	.file-title {
 		display: flex;
 		align-items: center;
+		min-width: 0;
 		gap: 0.35rem;
 		margin-top: 0.35rem;
 		font-size: 0.92rem;

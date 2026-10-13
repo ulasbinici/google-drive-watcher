@@ -308,6 +308,41 @@
 				{/each}
 			</ul>
 
+			{#if browser.shortcuts.length}
+				<section class="shortcut-panel" aria-labelledby="browse-shortcuts-title">
+					<h3 id="browse-shortcuts-title" class="shortcut-title">
+						<Icon name="shortcut" size={15} /> Shortcuts
+					</h3>
+					<ul class="nav shortcuts">
+						{#each browser.shortcuts as shortcut (shortcut.id)}
+							<li>
+								<button
+									type="button"
+									class:active={browser.place.kind === 'folder' && browser.place.id === shortcut.id}
+									title="{shortcut.location} (double-click to open)"
+									ondblclick={() => void browser.openShortcut(shortcut.id)}
+									onkeydown={(event) => {
+										if (event.key === 'Enter') void browser.openShortcut(shortcut.id);
+									}}
+								>
+									<Icon name="folder" size={17} />
+									<span class="nav-text">{shortcut.name}</span>
+								</button>
+								<button
+									type="button"
+									class="shortcut-remove"
+									aria-label="Remove shortcut {shortcut.name}"
+									title="Remove shortcut"
+									onclick={() => void browser.removeShortcut(shortcut.id)}
+								>
+									<Icon name="close" size={14} />
+								</button>
+							</li>
+						{/each}
+					</ul>
+				</section>
+			{/if}
+
 			{#if browser.sharedDrives.length}
 				<h3 class="nav-title">Shared drives</h3>
 				<ul class="nav">
@@ -379,6 +414,12 @@
 							<Icon name="star" size={17} />
 							{selected.every((item) => item.starred) ? 'Unstar' : 'Star'}
 						</button>
+						{#if browser.shortcutLabel(selected)}
+							<button type="button" class="tool" onclick={() => void browser.toggleShortcuts(selected)}>
+								<Icon name="shortcut" size={17} />
+								{browser.shortcutLabel(selected)}
+							</button>
+						{/if}
 						{#if single}
 							<button
 								type="button"
@@ -774,6 +815,53 @@
 
 	.synced-row {
 		cursor: default;
+		color: var(--text-muted);
+	}
+
+	.shortcut-panel {
+		margin: 0.85rem 0.5rem 0 0.25rem;
+		padding: 0.5rem 0.25rem 0.4rem;
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		background: var(--surface);
+	}
+
+	.shortcut-title {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin: 0 0 0.25rem 0.85rem;
+		color: var(--text-muted);
+		font-size: 0.75rem;
+		font-weight: 600;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+	}
+
+	.shortcuts li > button:first-child {
+		padding-left: 0.85rem;
+		gap: 0.75rem;
+	}
+
+	.shortcuts li {
+		display: flex;
+		align-items: center;
+		gap: 0.1rem;
+		padding-right: 0.35rem;
+	}
+
+	.shortcuts li > button:first-child {
+		width: auto;
+		min-width: 0;
+		flex: 1;
+	}
+
+	.nav .shortcut-remove {
+		width: 1.6rem;
+		height: 1.6rem;
+		flex: none;
+		justify-content: center;
+		padding: 0;
 		color: var(--text-muted);
 	}
 

@@ -61,13 +61,14 @@
 			<button
 				type="button"
 				class="btn btn-sm"
-				title="Manage folders"
+				title="Choose which Drive folders to watch"
 				onclick={() => void openFoldersWindow()}
 			>
-				<Icon name="folder-plus" size={15} />
-				Folders
+				<Icon name="eye" size={15} />
+				Watch
 			</button>
 			<button type="button" class="btn btn-sm" onclick={() => (app.settingsOpen = true)}>
+				<Icon name="settings" size={15} />
 				Settings
 			</button>
 			<SettingsDialog />

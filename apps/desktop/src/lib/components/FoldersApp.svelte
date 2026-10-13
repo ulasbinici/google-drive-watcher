@@ -31,7 +31,7 @@
 <div class="shell">
 	<header class="header">
 		<div>
-			<h1>Folders</h1>
+			<h1>Watch</h1>
 			<p class="muted">Choose which Drive folders to watch</p>
 		</div>
 		<button type="button" class="btn btn-sm" onclick={() => void closeWindow()}>

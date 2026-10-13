@@ -77,7 +77,7 @@
 		>{browseWindow
 			? 'Drive Watch – Browse'
 			: foldersWindow
-				? 'Drive Watch – Folders'
+				? 'Drive Watch – Watch'
 				: 'Drive Watch'}</title
 	>
 </svelte:head>

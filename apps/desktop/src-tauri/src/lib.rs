@@ -438,7 +438,7 @@ fn show_folders(app: &tauri::AppHandle) -> Result<(), String> {
     // Same shell as Browse: index.html plus a label set before the page loads.
     // A path like "folders" is served as HTML without an .html name, and WebView2 leaves that blank.
     WebviewWindowBuilder::new(app, FOLDERS_LABEL, WebviewUrl::App("index.html".into()))
-        .title("Drive Watch – Folders")
+        .title("Drive Watch – Watch")
         .inner_size(900.0, 760.0)
         .min_inner_size(640.0, 520.0)
         .center()

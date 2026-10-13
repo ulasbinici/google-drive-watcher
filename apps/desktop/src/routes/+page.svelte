@@ -2,6 +2,7 @@
 	import AppHeader from '$lib/components/AppHeader.svelte';
 	import FolderSyncPanel from '$lib/components/FolderSyncPanel.svelte';
 	import NotificationList from '$lib/components/NotificationList.svelte';
+	import ShortcutsPanel from '$lib/components/ShortcutsPanel.svelte';
 	import SignInPanel from '$lib/components/SignInPanel.svelte';
 	import StatusBlock from '$lib/components/StatusBlock.svelte';
 	import SyncStatus from '$lib/components/SyncStatus.svelte';
@@ -32,6 +33,7 @@
 			{/if}
 			<div class="columns">
 				<div class="primary">
+					<ShortcutsPanel />
 					<NotificationList collapsible={false} />
 				</div>
 				<div class="secondary">

@@ -38,6 +38,15 @@ import {
 	writeLocalFile
 } from '$lib/native';
 import { signedInUser } from '$lib/services/firebase-backend';
+import {
+	listenBrowseOpen,
+	listenFolderShortcuts,
+	loadFolderShortcuts,
+	removeFolderShortcut,
+	saveFolderShortcut,
+	takeStagedShortcut,
+	type FolderShortcut
+} from '$lib/state/folder-shortcuts';
 import { loadPairs, type SyncPair } from '$lib/sync/sync-store';
 import type { Loadable } from '$lib/types';
 import type { PickedFile } from './drop';
@@ -142,9 +151,13 @@ export class BrowserState {
 	dragging = $state(false);
 	dialog = $state<Dialog | null>(null);
 	syncPairs = $state<SyncPair[]>([]);
+	shortcuts = $state<FolderShortcut[]>([]);
 
 	#back = $state<HistoryEntry[]>([]);
 	#forward = $state<HistoryEntry[]>([]);
+	#uid: string | null = null;
+	#queuedOpen: string | null = null;
+	#openedFromShortcut = false;
 	#loadAbort: AbortController | undefined;
 	#searchTimer: ReturnType<typeof setTimeout> | undefined;
 	#toastId = 0;
@@ -192,9 +205,32 @@ export class BrowserState {
 			void this.refreshAccess();
 		});
 		const offPairs = listenAppEvent(APP_EVENTS.syncPairsChanged, () => void this.loadSyncPairs());
+		const offShortcuts = listenFolderShortcuts(() => void this.#reloadShortcuts());
+		const onStorage = () => {
+			if (!this.#uid || this.session !== 'signed-in') return;
+			void takeStagedShortcut(this.#uid).then((id) => {
+				if (!id) return;
+				this.#openedFromShortcut = true;
+				void this.openShortcut(id);
+			});
+		};
+		window.addEventListener('storage', onStorage);
+		const offOpen = listenBrowseOpen((id) => {
+			if (this.session === 'signed-in') {
+				this.#openedFromShortcut = true;
+				this.#queuedOpen = null;
+				if (this.#uid) void takeStagedShortcut(this.#uid);
+				void this.openShortcut(id);
+				return;
+			}
+			this.#queuedOpen = id;
+		});
 		return () => {
 			offEdits();
 			offPairs();
+			offShortcuts();
+			offOpen();
+			window.removeEventListener('storage', onStorage);
 			this.#loadAbort?.abort();
 			clearTimeout(this.#searchTimer);
 			for (const transfer of this.transfers) transfer.controller.abort();
@@ -212,12 +248,81 @@ export class BrowserState {
 			return;
 		}
 		this.session = 'signed-in';
+		this.#uid = user.uid;
 		await this.refreshAccess();
 		void this.loadSyncPairs();
+		this.shortcuts = await loadFolderShortcuts(user.uid);
 		listSharedDrives()
 			.then((drives) => (this.sharedDrives = drives))
 			.catch(() => undefined);
-		this.goMyDrive();
+		const queued = this.#queuedOpen;
+		this.#queuedOpen = null;
+		const staged = queued ?? (await takeStagedShortcut(user.uid));
+		const late = this.#queuedOpen;
+		this.#queuedOpen = null;
+		const openId = late ?? staged;
+		if (openId) await this.openShortcut(openId);
+		else if (!this.#openedFromShortcut) this.goMyDrive();
+	}
+
+	async #reloadShortcuts() {
+		if (!this.#uid) return;
+		this.shortcuts = await loadFolderShortcuts(this.#uid);
+	}
+
+	hasShortcut(id: string): boolean {
+		return this.shortcuts.some((shortcut) => shortcut.id === id);
+	}
+
+	/** Create shortcut when any selected folder is new; remove when every folder already is one. */
+	shortcutLabel(items: DriveItem[]): 'Create shortcut' | 'Remove shortcut' | null {
+		if (!items.length || items.some((item) => !item.isFolder)) return null;
+		return items.every((item) => this.hasShortcut(item.id)) ? 'Remove shortcut' : 'Create shortcut';
+	}
+
+	async toggleShortcuts(items: DriveItem[]) {
+		const folders = items.filter((item) => item.isFolder);
+		if (!folders.length || !this.#uid) return;
+		if (folders.every((folder) => this.hasShortcut(folder.id))) {
+			for (const folder of folders) await this.removeShortcut(folder.id);
+			return;
+		}
+		for (const folder of folders) {
+			if (this.hasShortcut(folder.id)) continue;
+			const ancestors = await this.#ancestors(folder).catch(() => [] as Crumb[]);
+			this.shortcuts = await saveFolderShortcut(this.#uid, {
+				id: folder.id,
+				name: folder.name,
+				driveId: folder.driveId,
+				webViewLink: folder.webViewLink,
+				location: [...ancestors.map((crumb) => crumb.name), folder.name].join(' / ')
+			});
+		}
+	}
+
+	async removeShortcut(id: string) {
+		if (!this.#uid) return;
+		this.shortcuts = await removeFolderShortcut(this.#uid, id);
+	}
+
+	/** Opens a shortcut by id, rebuilding the breadcrumb from Drive rather than the current folder. */
+	async openShortcut(id: string) {
+		try {
+			const folder = await getItem(id);
+			if (!folder.isFolder) {
+				this.notify('That shortcut no longer points to a folder.');
+				await this.removeShortcut(id);
+				if (!this.crumbs.length) this.goMyDrive();
+				return;
+			}
+			const place: Place = { kind: 'folder', id: folder.id, driveId: folder.driveId };
+			const crumb: Crumb = { id: folder.id, name: folder.name, place };
+			const ancestors = await this.#ancestors(folder).catch(() => [] as Crumb[]);
+			this.#navigate(place, [...ancestors, crumb], folder.canAddChildren);
+		} catch (error) {
+			this.notify(errorMessage(error));
+			if (!this.crumbs.length) this.goMyDrive();
+		}
 	}
 
 	async refreshAccess() {

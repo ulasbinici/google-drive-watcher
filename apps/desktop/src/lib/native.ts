@@ -182,5 +182,7 @@ export const APP_EVENTS = {
 	syncPairsChanged: 'sync-pairs-changed',
 	syncRun: 'sync-run',
 	fileEditsChanged: 'file-edits-changed',
-	localSyncDirty: 'local-sync-dirty'
+	localSyncDirty: 'local-sync-dirty',
+	folderShortcutsChanged: 'folder-shortcuts-changed',
+	browseOpenFolder: 'browse-open-folder'
 } as const;

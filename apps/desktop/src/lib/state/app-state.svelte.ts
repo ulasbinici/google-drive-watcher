@@ -2,7 +2,7 @@ import { createContext } from 'svelte';
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import { invalidateDriveToken } from '$lib/drive/drive-api';
 import { errorMessage } from '$lib/format';
-import { APP_EVENTS, emitAppEvent, setTrayMonitoring } from '$lib/native';
+import { APP_EVENTS, emitAppEvent, openBrowseWindow, setTrayMonitoring } from '$lib/native';
 import { requestIncrementalSync } from '$lib/sync/sync-store';
 import type { DriveNotifierBackend, Unsubscribe } from '$lib/services';
 import {
@@ -13,6 +13,13 @@ import {
 	saveNotificationMeta,
 	type NotificationMetaEntry
 } from '$lib/state/notification-meta';
+import {
+	listenFolderShortcuts,
+	loadFolderShortcuts,
+	removeFolderShortcut,
+	stageShortcutOpen,
+	type FolderShortcut
+} from '$lib/state/folder-shortcuts';
 import type {
 	AuthStatus,
 	DriveFolder,
@@ -77,6 +84,7 @@ export class AppState {
 	syncError = $state<string | null>(null);
 
 	notifications = $state<Loadable<NotificationView[]>>({ status: 'idle' });
+	shortcuts = $state<FolderShortcut[]>([]);
 	#meta: Record<string, NotificationMetaEntry> = {};
 	#metaUid: string | null = null;
 	#metaReady = false;
@@ -192,6 +200,8 @@ export class AppState {
 		void this.loadMonitoring();
 		void this.loadSync();
 		if (this.#listenNotifications) void this.loadNotifications();
+		this.#sessionCleanup.push(listenFolderShortcuts(() => void this.loadShortcuts()));
+		void this.loadShortcuts();
 	}
 
 	#endSession() {
@@ -216,6 +226,7 @@ export class AppState {
 		this.sync = { status: 'idle' };
 		this.syncError = null;
 		this.notifications = { status: 'idle' };
+		this.shortcuts = [];
 		this.#meta = {};
 		this.#metaUid = null;
 		this.#metaReady = false;
@@ -502,6 +513,27 @@ export class AppState {
 			changed = true;
 		}
 		if (changed) void this.#commitMeta();
+	}
+
+	async loadShortcuts() {
+		const uid = this.user?.uid;
+		if (!uid) return;
+		const list = await loadFolderShortcuts(uid).catch(() => null);
+		if (!list || this.user?.uid !== uid) return;
+		this.shortcuts = list;
+	}
+
+	async removeShortcut(id: string) {
+		const uid = this.user?.uid;
+		if (!uid) return;
+		this.shortcuts = await removeFolderShortcut(uid, id);
+	}
+
+	async openShortcut(shortcut: FolderShortcut) {
+		const uid = this.user?.uid;
+		if (!uid) return;
+		await stageShortcutOpen(uid, shortcut.id);
+		await openBrowseWindow();
 	}
 
 	async loadNotifications() {

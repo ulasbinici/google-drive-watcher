@@ -59,6 +59,14 @@
 			run: () => void browser.toggleStar(items),
 			divider: !single
 		});
+		const shortcutLabel = browser.shortcutLabel(items);
+		if (shortcutLabel) {
+			list.push({
+				label: shortcutLabel,
+				icon: 'shortcut',
+				run: () => void browser.toggleShortcuts(items)
+			});
+		}
 		if (single?.isFolder) {
 			const synced = browser.syncPairFor(single.id);
 			list.push({
