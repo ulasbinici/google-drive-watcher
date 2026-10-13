@@ -1,5 +1,5 @@
 import { createContext } from 'svelte';
-import { SvelteSet } from 'svelte/reactivity';
+import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import {
 	createFolder,
 	downloadBytes,
@@ -13,6 +13,7 @@ import {
 	listSpecial,
 	listTree,
 	moveItem,
+	removeFromParent,
 	renameItem,
 	restoreItem,
 	rootFolderId,
@@ -76,6 +77,9 @@ export interface Toast {
 	actionLabel?: string;
 	action?: () => void;
 }
+
+/** Uniform leave-folder action. Mixed selections have no safe action. */
+export type RemovalAction = 'trash' | 'remove';
 
 export type Dialog =
 	| { kind: 'new-folder' }
@@ -175,7 +179,7 @@ export class BrowserState {
 	selectedItems = $derived(this.sorted.filter((item) => this.selection.has(item.id)));
 	currentFolderId = $derived(this.place.kind === 'folder' ? this.place.id : null);
 	canUploadHere = $derived(this.canEdit && this.writable && this.currentFolderId !== null);
-	syncedFolderIds = $derived(new Set(this.syncPairs.map((pair) => pair.driveFolderId)));
+	syncedFolderIds = $derived(new SvelteSet(this.syncPairs.map((pair) => pair.driveFolderId)));
 	activeTransfers = $derived(
 		this.transfers.filter((t) => t.status === 'queued' || t.status === 'active').length
 	);
@@ -504,6 +508,48 @@ export class BrowserState {
 		}
 	}
 
+	/**
+	 * Trash when every item can be trashed. Remove from the open folder when
+	 * none can be trashed and each item lists that folder as a parent.
+	 * Returns null for an empty, mixed, or otherwise unsafe selection.
+	 */
+	removalAction(items: readonly DriveItem[]): RemovalAction | null {
+		if (items.length === 0 || this.place.kind === 'trash') return null;
+		const parentId = this.currentFolderId;
+		let action: RemovalAction | null = null;
+		for (const item of items) {
+			const next: RemovalAction | null = item.canTrash
+				? 'trash'
+				: parentId !== null && item.parents.includes(parentId)
+					? 'remove'
+					: null;
+			if (!next || (action !== null && action !== next)) return null;
+			action = next;
+		}
+		return action;
+	}
+
+	/** Toolbar, Delete, and the context menu share this so a mixed selection never runs. */
+	async removeSelected(items: DriveItem[]) {
+		const action = this.removalAction(items);
+		if (action === 'trash') await this.trash(items);
+		else if (action === 'remove') await this.#removeFromActiveParent(items);
+	}
+
+	async #removeFromActiveParent(items: DriveItem[]) {
+		const parentId = this.currentFolderId;
+		if (!this.#requireEdit() || !parentId || this.removalAction(items) !== 'remove') return;
+		try {
+			await Promise.all(items.map((item) => removeFromParent(item.id, parentId)));
+			this.clearSelection();
+			await this.load();
+			const label = items.length === 1 ? `“${items[0]!.name}”` : `${items.length} items`;
+			this.notify(`${label} removed`);
+		} catch (error) {
+			this.notify(errorMessage(error));
+		}
+	}
+
 	async restore(items: DriveItem[], announce = true) {
 		if (!this.#requireEdit()) return;
 		try {
@@ -597,7 +643,7 @@ export class BrowserState {
 	/** Uploads picked or dropped files, recreating their folder structure under `targetId`. */
 	async upload(picked: PickedFile[], targetId = this.currentFolderId, targetName = this.title) {
 		if (!this.#requireEdit() || !targetId || picked.length === 0) return;
-		const folders = new Map<string, Promise<string>>([['', Promise.resolve(targetId)]]);
+		const folders = new SvelteMap<string, Promise<string>>([['', Promise.resolve(targetId)]]);
 		const folderFor = (dir: string): Promise<string> => {
 			const known = folders.get(dir);
 			if (known) return known;

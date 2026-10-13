@@ -1,14 +1,58 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { CHANGE_LABELS, formatDateTime, formatRelative } from '$lib/format';
 	import { getAppState } from '$lib/state/app-state.svelte';
-	import type { ChangeType } from '$lib/types';
+	import type { ChangeType, NotificationView } from '$lib/types';
 	import Icon from './Icon.svelte';
 	import StatusBlock from './StatusBlock.svelte';
 
+	let { collapsible = true }: { collapsible?: boolean } = $props();
+
 	const app = getAppState();
 	let collapsed = $state(false);
+	let editingId = $state<string | null>(null);
+	let noteValue = $state('');
+	let noteTitle = $state('');
+	let noteHadText = $state(false);
+	let noteReturnFocus = $state<HTMLButtonElement | null>(null);
+
 	const items = $derived(app.notifications.status === 'idle' ? undefined : app.notifications.data);
-	const readCount = $derived((items ?? []).filter((item) => item.read).length);
+	const readCount = $derived((items ?? []).filter((item) => item.read && !item.pinned).length);
+
+	function openNote(notification: NotificationView, trigger: HTMLButtonElement) {
+		editingId = notification.id;
+		noteValue = notification.note;
+		noteTitle = notification.fileName;
+		noteHadText = notification.note.length > 0;
+		noteReturnFocus = trigger;
+	}
+
+	async function closeNote() {
+		const trigger = noteReturnFocus;
+		editingId = null;
+		noteReturnFocus = null;
+		await tick();
+		trigger?.focus();
+	}
+
+	function submitNote(event: SubmitEvent) {
+		event.preventDefault();
+		if (!editingId) return;
+		void app.saveNotificationNote(editingId, noteValue);
+		void closeNote();
+	}
+
+	function onNoteKeydown(event: KeyboardEvent) {
+		if (event.key !== 'Escape' || !editingId) return;
+		event.preventDefault();
+		void closeNote();
+	}
+
+	function focusNote(node: HTMLTextAreaElement) {
+		node.focus();
+		const length = node.value.length;
+		node.setSelectionRange(length, length);
+	}
 
 	function openExternal(event: MouseEvent, url: string) {
 		if (!('__TAURI_INTERNALS__' in window)) return;
@@ -26,20 +70,24 @@
 	};
 </script>
 
-<section class="card fill" aria-labelledby="notifications-heading">
+<svelte:window onkeydown={onNoteKeydown} />
+
+<section class={['card', 'fill', { steady: !collapsible }]} aria-labelledby="notifications-heading">
 	<div class="card-header">
 		<h2 id="notifications-heading">Recent changes</h2>
 		<div class="actions">
-			<button
-				type="button"
-				class="btn btn-sm btn-ghost"
-				aria-expanded={!collapsed}
-				aria-controls="notifications-body"
-				aria-label={collapsed ? 'Expand recent changes' : 'Collapse recent changes'}
-				onclick={() => (collapsed = !collapsed)}
-			>
-				<span class="collapse-chevron" class:collapsed><Icon name="chevron" size={16} /></span>
-			</button>
+			{#if collapsible}
+				<button
+					type="button"
+					class="btn btn-sm btn-ghost"
+					aria-expanded={!collapsed}
+					aria-controls="notifications-body"
+					aria-label={collapsed ? 'Expand recent changes' : 'Collapse recent changes'}
+					onclick={() => (collapsed = !collapsed)}
+				>
+					<span class={['collapse-chevron', { collapsed }]}><Icon name="chevron" size={16} /></span>
+				</button>
+			{/if}
 			{#if app.unreadCount > 0}
 				<span class="badge" data-tone="accent">{app.unreadCount} unread</span>
 				<button type="button" class="btn btn-sm btn-ghost" onclick={() => app.markAllRead()}>
@@ -54,7 +102,7 @@
 			{/if}
 		</div>
 	</div>
-	<div class="card-body" id="notifications-body" hidden={collapsed}>
+	<div class="card-body" id="notifications-body" hidden={collapsible && collapsed}>
 		{#if app.notifications.status === 'error'}
 			<StatusBlock
 				kind="error"
@@ -74,18 +122,46 @@
 		{:else}
 			<ul class="list">
 				{#each items as notification (notification.id)}
-					<li class:unread={!notification.read}>
+					<li class={{ unread: !notification.read }}>
 						<article aria-labelledby="note-{notification.id}">
 							<div class="top">
 								<span class="badge" data-tone={tone[notification.changeType]}>
 									{CHANGE_LABELS[notification.changeType]}
 								</span>
-								<time
-									datetime={notification.occurredAt}
-									title={formatDateTime(notification.occurredAt)}
-								>
-									{formatRelative(notification.occurredAt, app.now)}
-								</time>
+								<div class="row-end">
+									<time
+										datetime={notification.occurredAt}
+										title={formatDateTime(notification.occurredAt)}
+									>
+										{formatRelative(notification.occurredAt, app.now)}
+									</time>
+									<button
+										type="button"
+										class={['icon-btn', { active: notification.pinned }]}
+										aria-pressed={notification.pinned}
+										title={notification.pinned ? 'Unpin' : 'Pin'}
+										aria-label={notification.pinned
+											? `Unpin ${notification.fileName}`
+											: `Pin ${notification.fileName}`}
+										onclick={() => app.setNotificationPinned(notification.id, !notification.pinned)}
+									>
+										<Icon name="pin" size={15} />
+									</button>
+									<button
+										type="button"
+										class="icon-btn"
+										title={notification.note ? 'Edit note' : 'Add note'}
+										aria-label={notification.note
+											? `Edit note for ${notification.fileName}`
+											: `Add note for ${notification.fileName}`}
+										onclick={(event) => {
+											const trigger = event.currentTarget;
+											if (trigger instanceof HTMLButtonElement) openNote(notification, trigger);
+										}}
+									>
+										<Icon name={notification.note ? 'edit-note' : 'note'} size={15} />
+									</button>
+								</div>
 							</div>
 							<h3 id="note-{notification.id}">
 								<Icon name="file" size={15} />
@@ -96,6 +172,9 @@
 								<span aria-hidden="true"> · </span>
 								{notification.driveName}
 							</p>
+							{#if notification.note}
+								<p class="user-note">{notification.note}</p>
+							{/if}
 							<dl class="meta">
 								{#if notification.actorName}
 									<dt>Changed by</dt>
@@ -141,6 +220,35 @@
 	</div>
 </section>
 
+{#if editingId}
+	<div class="backdrop">
+		<button type="button" class="scrim" aria-label="Cancel" onclick={() => void closeNote()}></button>
+		<div
+			class="dialog"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="notification-note-title"
+			aria-describedby="notification-note-file"
+		>
+			<form onsubmit={submitNote}>
+				<h2 id="notification-note-title">{noteHadText ? 'Edit note' : 'Add note'}</h2>
+				<p id="notification-note-file" class="muted file-name">{noteTitle}</p>
+				<label class="note-label" for="notification-note-text">Note</label>
+				<textarea
+					id="notification-note-text"
+					{@attach focusNote}
+					bind:value={noteValue}
+					rows="4"
+				></textarea>
+				<div class="dialog-actions">
+					<button type="button" class="btn btn-ghost" onclick={() => void closeNote()}>Cancel</button>
+					<button type="submit" class="btn btn-primary">Save</button>
+				</div>
+			</form>
+		</div>
+	</div>
+{/if}
+
 <style>
 	.actions {
 		display: flex;
@@ -178,7 +286,7 @@
 	}
 
 	@media (max-width: 900px) {
-		.fill {
+		.fill:not(.steady) {
 			flex: none;
 			min-height: 18rem;
 		}
@@ -201,6 +309,33 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: 0.5rem;
+	}
+
+	.row-end {
+		display: flex;
+		align-items: center;
+		gap: 0.15rem;
+		min-width: 0;
+	}
+
+	.row-end .icon-btn {
+		width: 1.75rem;
+		height: 1.75rem;
+	}
+
+	.icon-btn.active {
+		color: var(--accent);
+		background: var(--accent-soft);
+	}
+
+	.user-note {
+		margin-top: 0.4rem;
+		padding: 0.35rem 0.5rem;
+		border-radius: var(--radius-sm);
+		background: var(--surface-2);
+		font-size: 0.8rem;
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
 	}
 
 	time {
@@ -254,5 +389,68 @@
 
 	a.btn {
 		text-decoration: none;
+	}
+
+	.backdrop {
+		position: fixed;
+		inset: 0;
+		z-index: 30;
+		display: grid;
+		place-items: center;
+	}
+
+	.scrim {
+		position: absolute;
+		inset: 0;
+		border: 0;
+		background: rgb(15 20 28 / 45%);
+	}
+
+	.dialog {
+		position: relative;
+		width: min(26rem, calc(100vw - 2rem));
+		padding: 1.25rem;
+		border-radius: var(--radius);
+		background: var(--surface);
+		box-shadow: 0 12px 40px rgb(0 0 0 / 35%);
+	}
+
+	form {
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+	}
+
+	.dialog h2 {
+		font-size: 1.05rem;
+		font-weight: 650;
+	}
+
+	.file-name {
+		font-size: 0.85rem;
+		overflow-wrap: anywhere;
+	}
+
+	.note-label {
+		font-size: 0.82rem;
+		font-weight: 600;
+	}
+
+	textarea {
+		width: 100%;
+		min-height: 6.5rem;
+		padding: 0.6rem 0.75rem;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		background: var(--surface);
+		color: var(--text);
+		font: inherit;
+		resize: vertical;
+	}
+
+	.dialog-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 0.5rem;
 	}
 </style>

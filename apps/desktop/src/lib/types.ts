@@ -75,6 +75,12 @@ export interface DriveNotification {
 	webViewLink: string | null;
 }
 
+/** Server notification plus local-only pin and note. Those two fields are never written to Firestore. */
+export interface NotificationView extends DriveNotification {
+	pinned: boolean;
+	note: string;
+}
+
 export type Loadable<T> =
 	| { status: 'idle' }
 	| { status: 'loading'; data?: T }

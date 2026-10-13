@@ -18,6 +18,7 @@ use tauri::{
 use tauri_plugin_deep_link::DeepLinkExt;
 
 const BROWSER_LABEL: &str = "browser";
+const FOLDERS_LABEL: &str = "folders";
 
 struct TrayStatus {
     icon: tauri::tray::TrayIcon,
@@ -422,6 +423,32 @@ fn show_browser(app: &tauri::AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+async fn open_folders(app: tauri::AppHandle) -> Result<(), String> {
+    show_folders(&app)
+}
+
+fn show_folders(app: &tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window(FOLDERS_LABEL) {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+    // Same shell as Browse: index.html plus a label set before the page loads.
+    // A path like "folders" is served as HTML without an .html name, and WebView2 leaves that blank.
+    WebviewWindowBuilder::new(app, FOLDERS_LABEL, WebviewUrl::App("index.html".into()))
+        .title("Drive Watch – Folders")
+        .inner_size(900.0, 760.0)
+        .min_inner_size(640.0, 520.0)
+        .center()
+        .initialization_script("window.__DRIVE_WATCH_WINDOW__ = 'folders'")
+        .disable_drag_drop_handler()
+        .build()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -443,6 +470,7 @@ pub fn run() {
             remove_local,
             watch_sync_roots,
             open_browser,
+            open_folders,
             set_tray_status,
             set_tray_controls,
             set_tray_monitoring

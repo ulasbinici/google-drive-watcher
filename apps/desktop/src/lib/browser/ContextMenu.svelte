@@ -71,11 +71,12 @@
 		if (single?.isFolder) {
 			list.push({ label: 'Open in Google Drive', icon: 'external', run: () => browser.openInDrive(single) });
 		}
+		const removal = browser.removalAction(items);
 		list.push({
-			label: 'Move to trash',
+			label: removal === 'remove' ? 'Remove' : 'Move to trash',
 			icon: 'trash',
-			run: () => void browser.trash(items),
-			disabled: !browser.canEdit || items.some((item) => !item.canTrash),
+			run: () => void browser.removeSelected(items),
+			disabled: !browser.canEdit || removal === null,
 			danger: true,
 			divider: true
 		});

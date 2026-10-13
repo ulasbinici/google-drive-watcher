@@ -5,6 +5,14 @@ import { errorMessage } from '$lib/format';
 import { APP_EVENTS, emitAppEvent, setTrayMonitoring } from '$lib/native';
 import { requestIncrementalSync } from '$lib/sync/sync-store';
 import type { DriveNotifierBackend, Unsubscribe } from '$lib/services';
+import {
+	loadNotificationMeta,
+	mergeNotifications,
+	notificationSnapshot,
+	sameNotificationSnapshot,
+	saveNotificationMeta,
+	type NotificationMetaEntry
+} from '$lib/state/notification-meta';
 import type {
 	AuthStatus,
 	DriveFolder,
@@ -12,6 +20,7 @@ import type {
 	DriveRoot,
 	Loadable,
 	MonitoringSettings,
+	NotificationView,
 	SyncStatus,
 	UserProfile,
 	WatchedFolder
@@ -67,9 +76,16 @@ export class AppState {
 	sync = $state<Loadable<SyncStatus>>({ status: 'idle' });
 	syncError = $state<string | null>(null);
 
-	notifications = $state<Loadable<DriveNotification[]>>({ status: 'idle' });
+	notifications = $state<Loadable<NotificationView[]>>({ status: 'idle' });
+	#meta: Record<string, NotificationMetaEntry> = {};
+	#metaUid: string | null = null;
+	#metaReady = false;
+	/** Ids that came from the server list or a live event. Snapshot-only pins are not included. */
+	#liveIds = new SvelteSet<string>();
 
 	now = $state(Date.now());
+	/** Live notification listener, native toasts, and incremental sync. Folders leaves this off. */
+	#listenNotifications = true;
 
 	myDrives = $derived((dataOf(this.drives) ?? []).filter((d) => d.kind === 'my-drive'));
 	sharedWithMe = $derived((dataOf(this.drives) ?? []).filter((d) => d.kind === 'shared-with-me'));
@@ -92,8 +108,13 @@ export class AppState {
 		this.backend = backend;
 	}
 
-	/** Wires up subscriptions; returns a teardown function. */
-	start(): Unsubscribe {
+	/**
+	 * Wires up subscriptions and returns a teardown function.
+	 * `notifications: false` skips the live listener, so this window does not
+	 * raise native toasts or request incremental sync. Auth, folders, and watch state still load.
+	 */
+	start(options?: { notifications?: boolean }): Unsubscribe {
+		this.#listenNotifications = options?.notifications !== false;
 		const offAuth = this.backend.auth.onAuthChanged((user) => this.#applyUser(user));
 		const clock = setInterval(() => (this.now = Date.now()), CLOCK_INTERVAL_MS);
 
@@ -154,18 +175,23 @@ export class AppState {
 
 	#beginSession() {
 		this.#endSession();
-		this.#sessionCleanup.push(
+		const cleanup: Unsubscribe[] = [
 			this.backend.watch.onSyncStatus((status) => {
 				this.sync = { status: 'ready', data: status };
-			}),
-			this.backend.notifications.onNotification((notification) => this.#receive(notification))
-		);
+			})
+		];
+		if (this.#listenNotifications) {
+			cleanup.push(
+				this.backend.notifications.onNotification((notification) => this.#receive(notification))
+			);
+		}
+		this.#sessionCleanup.push(...cleanup);
 		void this.loadDrives();
 		void this.loadFileEdits();
 		void this.loadWatched();
 		void this.loadMonitoring();
 		void this.loadSync();
-		void this.loadNotifications();
+		if (this.#listenNotifications) void this.loadNotifications();
 	}
 
 	#endSession() {
@@ -190,6 +216,10 @@ export class AppState {
 		this.sync = { status: 'idle' };
 		this.syncError = null;
 		this.notifications = { status: 'idle' };
+		this.#meta = {};
+		this.#metaUid = null;
+		this.#metaReady = false;
+		this.#liveIds.clear();
 		this.allowFileEdits = false;
 		this.settingsOpen = false;
 		this.settingsBusy = false;
@@ -420,35 +450,101 @@ export class AppState {
 
 	// ---- Notifications ------------------------------------------------------
 
+	async #ensureMeta() {
+		const uid = this.user?.uid;
+		if (!uid) return;
+		if (this.#metaReady && this.#metaUid === uid) return;
+		try {
+			const loaded = await loadNotificationMeta(uid);
+			if (this.user?.uid !== uid || (this.#metaReady && this.#metaUid === uid)) return;
+			this.#meta = loaded;
+			this.#metaUid = uid;
+			this.#metaReady = true;
+		} catch {
+			// Leave metadata unloaded so the next refresh can try again.
+		}
+	}
+
+	#commitMeta(): Promise<void> {
+		const uid = this.#metaUid;
+		if (!uid || uid !== this.user?.uid) return Promise.resolve();
+		return saveNotificationMeta(uid, this.#meta).catch(() => undefined);
+	}
+
+	#publish(incoming: DriveNotification[]) {
+		this.notifications = {
+			status: 'ready',
+			data: mergeNotifications(incoming, this.#meta, NOTIFICATION_LIMIT)
+		};
+	}
+
+	#liveIncoming(): DriveNotification[] {
+		return (dataOf(this.notifications) ?? [])
+			.filter((item) => this.#liveIds.has(item.id))
+			.map((item) => notificationSnapshot(item));
+	}
+
+	#syncPinnedSnapshots() {
+		if (this.notifications.status !== 'ready' || this.#metaUid !== this.user?.uid) return;
+		let changed = false;
+		for (const item of this.notifications.data) {
+			if (!item.pinned) continue;
+			const snapshot = notificationSnapshot(item);
+			const current = this.#meta[item.id];
+			if (
+				current?.pinned === true &&
+				current.note === item.note &&
+				sameNotificationSnapshot(current.snapshot, snapshot)
+			) {
+				continue;
+			}
+			this.#meta[item.id] = { pinned: true, note: item.note, snapshot };
+			changed = true;
+		}
+		if (changed) void this.#commitMeta();
+	}
+
 	async loadNotifications() {
+		const uid = this.user?.uid ?? null;
 		this.notifications = { status: 'loading', data: dataOf(this.notifications) };
 		try {
-			this.notifications = {
-				status: 'ready',
-				data: await this.backend.notifications.listRecent(NOTIFICATION_LIMIT)
-			};
+			await this.#ensureMeta();
+			const server = await this.backend.notifications.listRecent(NOTIFICATION_LIMIT);
+			if ((this.user?.uid ?? null) !== uid) return;
+			this.#liveIds = new SvelteSet(server.map((item) => item.id));
+			this.#publish(server);
+			this.#syncPinnedSnapshots();
 		} catch (error) {
+			if ((this.user?.uid ?? null) !== uid) return;
 			this.notifications = { status: 'error', error: errorMessage(error) };
 		}
 	}
 
 	#receive(notification: DriveNotification) {
 		const current = dataOf(this.notifications) ?? [];
-		if (current.some((n) => n.id === notification.id)) return;
-		this.notifications = {
-			status: 'ready',
-			data: [notification, ...current].slice(0, NOTIFICATION_LIMIT)
-		};
+		if (current.some((item) => item.id === notification.id)) return;
+		this.#liveIds.add(notification.id);
+		this.#publish([notification, ...this.#liveIncoming().filter((item) => item.id !== notification.id)]);
 		void requestIncrementalSync();
 	}
 
-	#setRead(predicate: (n: DriveNotification) => boolean) {
+	#setRead(predicate: (notification: NotificationView) => boolean) {
 		if (this.notifications.status !== 'ready') return;
-		for (const n of this.notifications.data) if (predicate(n)) n.read = true;
+		let changed = false;
+		for (const item of this.notifications.data) {
+			if (!predicate(item) || item.read) continue;
+			item.read = true;
+			const entry = this.#meta[item.id];
+			if (entry?.pinned) {
+				entry.snapshot = notificationSnapshot(item);
+				changed = true;
+			}
+		}
+		if (changed) void this.#commitMeta();
 	}
 
 	async markRead(id: string) {
-		this.#setRead((n) => n.id === id);
+		this.#setRead((item) => item.id === id);
 		await this.backend.notifications.markRead([id]).catch(() => this.loadNotifications());
 	}
 
@@ -460,9 +556,47 @@ export class AppState {
 	async clearRead() {
 		const current = dataOf(this.notifications);
 		if (current) {
-			this.notifications = { status: 'ready', data: current.filter((n) => !n.read) };
+			this.notifications = {
+				status: 'ready',
+				data: current.filter((item) => !item.read || item.pinned)
+			};
 		}
 		await this.backend.notifications.clearRead().catch(() => this.loadNotifications());
+	}
+
+	async setNotificationPinned(id: string, pinned: boolean) {
+		await this.#ensureMeta();
+		if (!this.#metaReady || this.#metaUid !== this.user?.uid) return;
+		const item = (dataOf(this.notifications) ?? []).find((entry) => entry.id === id);
+		if (!item) return;
+		const note = (this.#meta[id]?.note ?? item.note).trim();
+		if (pinned) {
+			this.#meta[id] = { pinned: true, note, snapshot: notificationSnapshot(item) };
+		} else if (note) {
+			this.#meta[id] = { pinned: false, note };
+		} else {
+			delete this.#meta[id];
+		}
+		this.#publish(this.#liveIncoming());
+		await this.#commitMeta();
+	}
+
+	async saveNotificationNote(id: string, note: string) {
+		await this.#ensureMeta();
+		if (!this.#metaReady || this.#metaUid !== this.user?.uid) return;
+		const item = (dataOf(this.notifications) ?? []).find((entry) => entry.id === id);
+		if (!item) return;
+		const trimmed = note.trim();
+		const pinned = this.#meta[id]?.pinned === true || item.pinned;
+		if (pinned) {
+			this.#meta[id] = { pinned: true, note: trimmed, snapshot: notificationSnapshot(item) };
+		} else if (trimmed) {
+			this.#meta[id] = { pinned: false, note: trimmed };
+		} else {
+			delete this.#meta[id];
+		}
+		this.#publish(this.#liveIncoming());
+		await this.#commitMeta();
 	}
 }
 

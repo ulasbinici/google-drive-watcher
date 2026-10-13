@@ -35,8 +35,18 @@
 	const selected = $derived(browser.selectedItems);
 	const single = $derived(selected.length === 1 ? selected[0]! : null);
 	const inTrash = $derived(browser.place.kind === 'trash');
+	const removal = $derived(browser.removalAction(selected));
 	const dropLabel = $derived(browser.dropFolder?.name ?? browser.title);
 	const myDriveActive = $derived(browser.place.kind === 'folder' && browser.crumbs[0]?.id === 'root');
+
+	function pinCrumbs(node: HTMLOListElement) {
+		let path = '';
+		for (let index = 0; index < browser.crumbs.length; index += 1) {
+			path += browser.crumbs[index]?.id ?? '';
+		}
+		if (path.length === 0) return;
+		node.scrollLeft = node.scrollWidth;
+	}
 
 	function rememberFileInput(node: HTMLInputElement) {
 		fileInput = node;
@@ -96,8 +106,8 @@
 			browser.menu = null;
 			newMenuOpen = false;
 			browser.clearSelection();
-		} else if (event.key === 'Delete' && selected.length && !inTrash) {
-			void browser.trash(selected);
+		} else if (event.key === 'Delete' && removal) {
+			void browser.removeSelected(selected);
 		} else if (event.key === 'F2' && single && browser.canEdit) {
 			browser.dialog = { kind: 'rename', item: single };
 		} else if (event.key === 'F5') {
@@ -358,11 +368,12 @@
 						<button
 							type="button"
 							class="tool"
-							title="Move to trash"
-							disabled={!browser.canEdit || selected.some((item) => !item.canTrash)}
-							onclick={() => void browser.trash(selected)}
+							title={removal === 'remove' ? 'Remove' : 'Move to trash'}
+							disabled={!browser.canEdit || removal === null}
+							onclick={() => void browser.removeSelected(selected)}
 						>
-							<Icon name="trash" size={17} /> Trash
+							<Icon name="trash" size={17} />
+							{removal === 'remove' ? 'Remove' : 'Trash'}
 						</button>
 						<button type="button" class="tool" title="Star" onclick={() => void browser.toggleStar(selected)}>
 							<Icon name="star" size={17} />
@@ -402,13 +413,14 @@
 					<button type="button" class="icon-btn" aria-label="Forward" title="Forward (Alt+→)" disabled={!browser.canGoForward} onclick={() => browser.forward()}>
 						<Icon name="arrow-right" size={18} />
 					</button>
-					<ol class="crumbs" aria-label="Location">
+					<ol class="crumbs" aria-label="Location" {@attach pinCrumbs}>
 						{#each browser.crumbs as crumb, index (crumb.id + index)}
 							<li>
 								{#if index > 0}<span class="sep"><Icon name="chevron" size={16} /></span>{/if}
 								<button
 									type="button"
 									class="crumb"
+									title={crumb.name}
 									aria-current={index === browser.crumbs.length - 1 ? 'location' : undefined}
 									onclick={() => browser.goCrumb(index)}
 								>
@@ -799,6 +811,7 @@
 		position: relative;
 		display: flex;
 		flex-direction: column;
+		min-width: 0;
 		min-height: 0;
 		margin: 0 0.75rem 0.75rem 0;
 		overflow: hidden;
@@ -811,6 +824,7 @@
 		flex-shrink: 0;
 		align-items: center;
 		gap: 0.25rem;
+		min-width: 0;
 		min-height: 3.5rem;
 		padding: 0.4rem 0.75rem;
 	}
@@ -853,26 +867,47 @@
 	.crumbs {
 		display: flex;
 		flex: 1;
-		flex-wrap: wrap;
+		flex-wrap: nowrap;
 		align-items: center;
 		min-width: 0;
 		margin: 0 0 0 0.25rem;
 		padding: 0;
+		overflow-x: auto;
+		overflow-y: hidden;
+		overscroll-behavior-x: contain;
 		list-style: none;
+		scrollbar-width: none;
+	}
+
+	.crumbs::-webkit-scrollbar {
+		display: none;
 	}
 
 	.crumbs li {
 		display: flex;
+		flex: 0 1 auto;
 		align-items: center;
-		min-width: 0;
+		min-width: 2.75rem;
+		max-width: 16rem;
+		overflow: hidden;
+	}
+
+	.crumbs li:last-child {
+		flex-shrink: 0;
+		min-width: 3rem;
+		max-width: min(28rem, 70%);
 	}
 
 	.sep {
+		display: inline-flex;
+		flex: none;
 		color: var(--text-muted);
 	}
 
 	.crumb {
-		max-width: 16rem;
+		flex: 1 1 auto;
+		min-width: 0;
+		max-width: 100%;
 		overflow: hidden;
 		padding: 0.3rem 0.7rem;
 		border: 0;

@@ -12,6 +12,7 @@
 		| 'download'
 		| 'drive'
 		| 'edit'
+		| 'edit-note'
 		| 'external'
 		| 'file'
 		| 'folder'
@@ -22,7 +23,9 @@
 		| 'list'
 		| 'logout'
 		| 'more'
+		| 'note'
 		| 'pause'
+		| 'pin'
 		| 'play'
 		| 'plus'
 		| 'refresh'
@@ -174,6 +177,18 @@
 	{:else if name === 'trash'}
 		<path d="M4 7h16M10 11v6M14 11v6" />
 		<path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3" />
+	{:else if name === 'pin'}
+		<path d="M12 17v5" />
+		<path
+			d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z"
+		/>
+	{:else if name === 'note'}
+		<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+		<path d="M14 3v6h6" />
+		<path d="M8 13h8M8 17h5" />
+	{:else if name === 'edit-note'}
+		<path d="M12 20h9" />
+		<path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z" />
 	{/if}
 </svg>
 

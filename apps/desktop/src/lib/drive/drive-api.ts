@@ -434,6 +434,12 @@ export function moveItem(item: DriveItem, targetId: string): Promise<DriveItem> 
 	return patchItem(item.id, {}, query);
 }
 
+/** Drops only `parentId`. Other parents stay, and the file is not trashed. */
+export function removeFromParent(fileId: string, parentId: string): Promise<DriveItem> {
+	const query = `&removeParents=${encodeURIComponent(parentId)}`;
+	return patchItem(fileId, {}, query);
+}
+
 // ---- Transfers -------------------------------------------------------------
 
 export type Progress = (loaded: number, total: number) => void;

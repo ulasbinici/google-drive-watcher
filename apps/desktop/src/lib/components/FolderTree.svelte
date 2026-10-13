@@ -355,21 +355,15 @@
 		overflow: hidden;
 	}
 
-	.tree {
+	.tree,
+	.results {
 		display: flex;
 		flex: 1;
 		flex-direction: column;
 		gap: 0.85rem;
-		min-height: 8rem;
+		min-height: 0;
 		overflow: auto;
 		padding-right: 0.15rem;
-	}
-
-	@media (max-width: 900px) {
-		.fill {
-			flex: none;
-			min-height: 24rem;
-		}
 	}
 
 	.group h3 {

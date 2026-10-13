@@ -1,11 +1,9 @@
 <script lang="ts">
 	import AppHeader from '$lib/components/AppHeader.svelte';
-	import FolderTree from '$lib/components/FolderTree.svelte';
+	import FolderSyncPanel from '$lib/components/FolderSyncPanel.svelte';
 	import NotificationList from '$lib/components/NotificationList.svelte';
-	import SelectionBar from '$lib/components/SelectionBar.svelte';
 	import SignInPanel from '$lib/components/SignInPanel.svelte';
 	import StatusBlock from '$lib/components/StatusBlock.svelte';
-	import FolderSyncPanel from '$lib/components/FolderSyncPanel.svelte';
 	import SyncStatus from '$lib/components/SyncStatus.svelte';
 	import { getAppState } from '$lib/state/app-state.svelte';
 
@@ -32,14 +30,14 @@
 			{#if app.authError}
 				<p class="banner" role="alert">{app.authError}</p>
 			{/if}
-			<div class="primary">
-				<FolderTree />
-				<SelectionBar />
-			</div>
-			<div class="secondary">
-				<SyncStatus />
-				<FolderSyncPanel />
-				<NotificationList />
+			<div class="columns">
+				<div class="primary">
+					<NotificationList collapsible={false} />
+				</div>
+				<div class="secondary">
+					<SyncStatus />
+					<FolderSyncPanel />
+				</div>
 			</div>
 		</main>
 	</div>
@@ -62,14 +60,22 @@
 	}
 
 	.workspace {
-		display: grid;
-		grid-template-columns: minmax(0, 1.45fr) minmax(16rem, 0.85fr);
-		gap: 1rem;
-		align-items: stretch;
+		display: flex;
 		flex: 1;
+		flex-direction: column;
+		gap: 1rem;
 		width: 100%;
 		min-height: 0;
 		padding: 1rem 1.25rem 1.25rem;
+	}
+
+	.columns {
+		display: grid;
+		grid-template-columns: minmax(0, 1.6fr) minmax(17rem, 0.75fr);
+		gap: 1rem;
+		align-items: stretch;
+		flex: 1;
+		min-height: 0;
 	}
 
 	.primary,
@@ -90,12 +96,8 @@
 		overscroll-behavior: contain;
 	}
 
-	.secondary :global(.fill) {
-		flex: none;
-	}
-
 	.banner {
-		grid-column: 1 / -1;
+		flex-shrink: 0;
 		margin: 0;
 		padding: 0.65rem 0.85rem;
 		border-radius: var(--radius-sm);
@@ -106,9 +108,12 @@
 
 	@media (max-width: 900px) {
 		.workspace {
+			padding: 0.875rem 1rem 1rem;
+		}
+
+		.columns {
 			grid-template-columns: 1fr;
-			grid-template-rows: minmax(0, 1.1fr) minmax(0, 1fr);
-			padding: 0.875rem 1rem 1.5rem;
+			grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
 		}
 	}
 </style>

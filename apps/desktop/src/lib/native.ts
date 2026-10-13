@@ -8,7 +8,7 @@ export interface LocalEntry {
 
 declare global {
 	interface Window {
-		/** Set by the Browse window before the page loads. */
+		/** Set by a secondary window before the page loads: `browser` or `folders`. */
 		__DRIVE_WATCH_WINDOW__?: string;
 	}
 }
@@ -20,6 +20,11 @@ export function isTauri(): boolean {
 /** True inside the separate Browse window, which loads the app shell rather than /browse. */
 export function isBrowseShell(): boolean {
 	return typeof window !== 'undefined' && window.__DRIVE_WATCH_WINDOW__ === 'browser';
+}
+
+/** True inside the separate Folders window, which loads the app shell rather than /folders. */
+export function isFoldersShell(): boolean {
+	return typeof window !== 'undefined' && window.__DRIVE_WATCH_WINDOW__ === 'folders';
 }
 
 async function invoke<T>(
@@ -104,6 +109,14 @@ export async function openBrowseWindow(): Promise<void> {
 		return;
 	}
 	await invoke('open_browser');
+}
+
+export async function openFoldersWindow(): Promise<void> {
+	if (!isTauri()) {
+		window.open('/folders', '_blank');
+		return;
+	}
+	await invoke('open_folders');
 }
 
 export async function pickLocalFolder(title: string): Promise<string | null> {

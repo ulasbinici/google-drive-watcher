@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import BrowseApp from '$lib/browser/BrowseApp.svelte';
-	import { isBrowseShell } from '$lib/native';
+	import FoldersApp from '$lib/components/FoldersApp.svelte';
+	import { isBrowseShell, isFoldersShell } from '$lib/native';
 	import { createBackend } from '$lib/services';
 	import { AppState, setAppState } from '$lib/state/app-state.svelte';
 	import { SyncManager, setSyncManager } from '$lib/sync/sync-manager.svelte';
@@ -10,13 +11,15 @@
 
 	let { children }: { children: Snippet } = $props();
 
-	// The desktop Browse window loads index.html and marks itself before scripts run.
-	// Opening /browse directly (the dev server) still uses the route.
+	// Desktop Browse and Folders windows load index.html and mark themselves before scripts run.
+	// Opening /browse or /folders directly (the dev server) still uses the route.
 	const embedBrowse = isBrowseShell();
+	const embedFolders = isFoldersShell();
 	const browseWindow = embedBrowse || page.url.pathname.startsWith('/browse');
+	const foldersWindow = embedFolders || page.url.pathname.startsWith('/folders');
 
-	// The Browse window builds its own state; only the main window watches Drive and runs syncs.
-	if (!browseWindow) {
+	// Folders builds its own AppState inside FoldersApp. Only the main window watches Drive and runs syncs.
+	if (!browseWindow && !foldersWindow) {
 		const app = new AppState(createBackend());
 		setAppState(app);
 		const sync = new SyncManager();
@@ -70,11 +73,19 @@
 </script>
 
 <svelte:head>
-	<title>{browseWindow ? 'Drive Watch – Browse' : 'Drive Watch'}</title>
+	<title
+		>{browseWindow
+			? 'Drive Watch – Browse'
+			: foldersWindow
+				? 'Drive Watch – Folders'
+				: 'Drive Watch'}</title
+	>
 </svelte:head>
 
 {#if embedBrowse}
 	<BrowseApp />
+{:else if embedFolders}
+	<FoldersApp />
 {:else}
 	{@render children()}
 {/if}

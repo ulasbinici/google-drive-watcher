@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { initials } from '$lib/format';
-	import { openBrowseWindow } from '$lib/native';
+	import { openBrowseWindow, openFoldersWindow } from '$lib/native';
 	import { getAppState } from '$lib/state/app-state.svelte';
 	import Icon from './Icon.svelte';
 	import SettingsDialog from './SettingsDialog.svelte';
@@ -57,6 +57,15 @@
 			<button type="button" class="btn btn-sm btn-primary" onclick={() => void openBrowseWindow()}>
 				<Icon name="folder" size={15} />
 				Browse
+			</button>
+			<button
+				type="button"
+				class="btn btn-sm"
+				title="Manage folders"
+				onclick={() => void openFoldersWindow()}
+			>
+				<Icon name="folder-plus" size={15} />
+				Folders
 			</button>
 			<button type="button" class="btn btn-sm" onclick={() => (app.settingsOpen = true)}>
 				Settings

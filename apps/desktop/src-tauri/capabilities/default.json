@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main and browse windows",
-  "windows": ["main", "browser"],
+  "description": "Capability for the main, browse, and folders windows",
+  "windows": ["main", "browser", "folders"],
   "permissions": [
     "core:default",
     "deep-link:default",
