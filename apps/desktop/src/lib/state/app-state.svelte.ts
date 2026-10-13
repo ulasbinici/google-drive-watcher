@@ -17,6 +17,7 @@ import {
 	listenFolderShortcuts,
 	loadFolderShortcuts,
 	removeFolderShortcut,
+	reorderFolderShortcuts,
 	setShortcutInTray,
 	stageShortcutOpen,
 	type FolderShortcut
@@ -537,6 +538,13 @@ export class AppState {
 		const uid = this.user?.uid;
 		if (!uid) return;
 		this.shortcuts = await removeFolderShortcut(uid, id);
+		await this.#syncTrayShortcuts();
+	}
+
+	async reorderShortcuts(orderedIds: readonly string[]) {
+		const uid = this.user?.uid;
+		if (!uid) return;
+		this.shortcuts = await reorderFolderShortcuts(uid, orderedIds);
 		await this.#syncTrayShortcuts();
 	}
 

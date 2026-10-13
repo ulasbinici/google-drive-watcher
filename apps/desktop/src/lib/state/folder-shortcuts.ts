@@ -167,6 +167,34 @@ export function setShortcutInTray(uid: string, id: string, inTray: boolean): Pro
 	});
 }
 
+/** Persist a user's shortcut order. Unknown ids are ignored; missing ids stay at the end. */
+export function reorderFolderShortcuts(uid: string, orderedIds: readonly string[]): Promise<FolderShortcut[]> {
+	if (!isUid(uid)) return Promise.resolve([]);
+	return enqueue(async () => {
+		const file = await readFile();
+		const current = file.shortcuts[uid] ?? [];
+		const byId = new Map(current.map((item) => [item.id, item]));
+		const seen = new Set<string>();
+		const next: FolderShortcut[] = [];
+		for (const id of orderedIds) {
+			if (seen.has(id)) continue;
+			const item = byId.get(id);
+			if (!item) continue;
+			seen.add(id);
+			next.push(item);
+		}
+		for (const item of current) {
+			if (!seen.has(item.id)) next.push(item);
+		}
+		const same = next.length === current.length && next.every((item, index) => item === current[index]);
+		if (same) return current;
+		file.shortcuts[uid] = next;
+		await writeFile(file);
+		announce();
+		return next;
+	});
+}
+
 export function removeFolderShortcut(uid: string, id: string): Promise<FolderShortcut[]> {
 	if (!isUid(uid)) return Promise.resolve([]);
 	return enqueue(async () => {
