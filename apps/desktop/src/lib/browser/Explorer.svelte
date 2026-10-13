@@ -1,5 +1,7 @@
 <script lang="ts">
 	import Icon, { type IconName } from '$lib/components/Icon.svelte';
+	import { errorMessage } from '$lib/format';
+	import { openLocalPath } from '$lib/native';
 	import StatusBlock from '$lib/components/StatusBlock.svelte';
 	import type { SpecialView } from '$lib/drive/drive-api';
 	import { getBrowserState, type SortKey } from './browser-state.svelte';
@@ -319,11 +321,8 @@
 								<button
 									type="button"
 									class:active={browser.place.kind === 'folder' && browser.place.id === shortcut.id}
-									title="{shortcut.location} (double-click to open)"
-									ondblclick={() => void browser.openShortcut(shortcut.id)}
-									onkeydown={(event) => {
-										if (event.key === 'Enter') void browser.openShortcut(shortcut.id);
-									}}
+									title={shortcut.location}
+									onclick={() => void browser.openShortcut(shortcut.id)}
 								>
 									<Icon name="folder" size={17} />
 									<span class="nav-text">{shortcut.name}</span>
@@ -366,13 +365,19 @@
 				<ul class="nav synced">
 					{#each browser.syncPairs as pair (pair.id)}
 						<li title="{pair.drivePath} ⇄ {pair.localPath}">
-							<span class="synced-row">
+							<button
+								type="button"
+								class="synced-row"
+								title="Open {pair.localPath}"
+								onclick={() =>
+									void openLocalPath(pair.localPath).catch((error) => browser.notify(errorMessage(error)))}
+							>
 								<Icon name="sync" size={16} />
 								<span class="nav-text">{pair.driveFolderName}</span>
 								{#if pair.lastError}
 									<span class="sync-error"><Icon name="warning" size={14} label={pair.lastError} /></span>
 								{/if}
-							</span>
+							</button>
 						</li>
 					{/each}
 				</ul>
@@ -814,7 +819,6 @@
 	}
 
 	.synced-row {
-		cursor: default;
 		color: var(--text-muted);
 	}
 

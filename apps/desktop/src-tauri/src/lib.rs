@@ -16,16 +16,24 @@ use tauri::{
     Emitter, Manager, WebviewUrl, WebviewWindowBuilder,
 };
 use tauri_plugin_deep_link::DeepLinkExt;
+use tauri_plugin_opener::OpenerExt;
 
 const BROWSER_LABEL: &str = "browser";
 const FOLDERS_LABEL: &str = "folders";
 
 struct TrayStatus {
     icon: tauri::tray::TrayIcon,
+    menu: Menu<tauri::Wry>,
     label: tauri::menu::MenuItem<tauri::Wry>,
     pause: tauri::menu::MenuItem<tauri::Wry>,
     monitor: tauri::menu::MenuItem<tauri::Wry>,
     sync_now: tauri::menu::MenuItem<tauri::Wry>,
+}
+
+#[derive(Deserialize)]
+struct TrayShortcut {
+    id: String,
+    name: String,
 }
 
 fn clip(text: &str, max: usize) -> String {
@@ -229,6 +237,18 @@ fn remove_local(root: String, relative: String) -> Result<(), String> {
     }
 }
 
+/// Opens a local directory in the file manager. Runs in-process so it is not blocked by the opener plugin ACL.
+#[tauri::command]
+fn open_local_folder(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let folder = PathBuf::from(&path);
+    if !folder.is_dir() {
+        return Err(format!("Folder not found: {path}"));
+    }
+    app.opener()
+        .open_path(path, None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
 #[derive(Deserialize)]
 struct WatchRoot {
     id: String,
@@ -384,6 +404,42 @@ fn set_tray_controls(app: tauri::AppHandle, paused: bool, has_pairs: bool) -> Re
 }
 
 #[tauri::command]
+fn set_tray_shortcuts(app: tauri::AppHandle, shortcuts: Vec<TrayShortcut>) -> Result<(), String> {
+    let status = app.state::<TrayStatus>();
+    let menu = &status.menu;
+    let stale: Vec<String> = menu
+        .items()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter_map(|item| {
+            let id = item.id().as_ref().to_string();
+            id.starts_with("sc:").then_some(id)
+        })
+        .collect();
+    for id in stale {
+        if let Some(item) = menu.get(&id) {
+            menu.remove(&item).map_err(|e| e.to_string())?;
+        }
+    }
+    if shortcuts.is_empty() {
+        return Ok(());
+    }
+    let items = menu.items().map_err(|e| e.to_string())?;
+    let mut position = items
+        .iter()
+        .position(|item| item.id().as_ref() == "quit")
+        .unwrap_or(items.len());
+    for shortcut in shortcuts {
+        let label = clip(&shortcut.name, 60);
+        let item = MenuItem::with_id(&app, format!("sc:{}", shortcut.id), label, true, None::<&str>)
+            .map_err(|e| e.to_string())?;
+        menu.insert(&item, position).map_err(|e| e.to_string())?;
+        position += 1;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn set_tray_monitoring(app: tauri::AppHandle, paused: bool) -> Result<(), String> {
     let status = app.state::<TrayStatus>();
     status
@@ -468,12 +524,14 @@ pub fn run() {
             scan_dir,
             stat_path,
             remove_local,
+            open_local_folder,
             watch_sync_roots,
             open_browser,
             open_folders,
             set_tray_status,
             set_tray_controls,
-            set_tray_monitoring
+            set_tray_monitoring,
+            set_tray_shortcuts
         ])
         .setup(|app| {
             let watch_tx = start_watch_hub(app.handle().clone());
@@ -516,26 +574,34 @@ pub fn run() {
                         show_main_window(tray.app_handle());
                     }
                 })
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    "show" => show_main_window(app),
-                    "browse" => {
-                        let _ = show_browser(app);
+                .on_menu_event(|app, event| {
+                    let id = event.id.as_ref();
+                    if let Some(folder_id) = id.strip_prefix("sc:") {
+                        let _ = app.emit("tray-open-shortcut", folder_id.to_string());
+                        return;
                     }
-                    "sync-now" => {
-                        let _ = app.emit("tray-sync-now", ());
+                    match id {
+                        "show" => show_main_window(app),
+                        "browse" => {
+                            let _ = show_browser(app);
+                        }
+                        "sync-now" => {
+                            let _ = app.emit("tray-sync-now", ());
+                        }
+                        "toggle-sync" => {
+                            let _ = app.emit("tray-toggle-sync", ());
+                        }
+                        "toggle-monitoring" => {
+                            let _ = app.emit("tray-toggle-monitoring", ());
+                        }
+                        "quit" => app.exit(0),
+                        _ => {}
                     }
-                    "toggle-sync" => {
-                        let _ = app.emit("tray-toggle-sync", ());
-                    }
-                    "toggle-monitoring" => {
-                        let _ = app.emit("tray-toggle-monitoring", ());
-                    }
-                    "quit" => app.exit(0),
-                    _ => {}
                 })
                 .build(app)?;
             app.manage(TrayStatus {
                 icon,
+                menu,
                 label: sync_status,
                 pause,
                 monitor,

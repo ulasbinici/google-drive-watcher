@@ -295,7 +295,8 @@ export class BrowserState {
 				name: folder.name,
 				driveId: folder.driveId,
 				webViewLink: folder.webViewLink,
-				location: [...ancestors.map((crumb) => crumb.name), folder.name].join(' / ')
+				location: [...ancestors.map((crumb) => crumb.name), folder.name].join(' / '),
+				inTray: false
 			});
 		}
 	}

@@ -8,6 +8,8 @@ export interface FolderShortcut {
 	webViewLink: string | null;
 	/** Breadcrumb text, for example "Shared with me / Games / Dev files". */
 	location: string;
+	/** When true, the shortcut is also an item in the tray menu. */
+	inTray: boolean;
 }
 
 interface ShortcutFile {
@@ -60,7 +62,8 @@ function cleanShortcut(value: unknown): FolderShortcut | null {
 		name: raw.name.trim(),
 		driveId: typeof raw.driveId === 'string' ? raw.driveId : null,
 		webViewLink: typeof raw.webViewLink === 'string' ? raw.webViewLink : null,
-		location: typeof raw.location === 'string' ? raw.location.trim() : raw.name.trim()
+		location: typeof raw.location === 'string' ? raw.location.trim() : raw.name.trim(),
+		inTray: raw.inTray === true
 	};
 }
 
@@ -141,11 +144,23 @@ export function saveFolderShortcut(uid: string, shortcut: FolderShortcut): Promi
 		const index = current.findIndex((item) => item.id === next.id);
 		if (index >= 0) {
 			const updated = [...current];
-			updated[index] = next;
+			updated[index] = { ...next, inTray: current[index]?.inTray === true };
 			file.shortcuts[uid] = updated;
 		} else {
 			file.shortcuts[uid] = [...current, next];
 		}
+		await writeFile(file);
+		announce();
+		return file.shortcuts[uid] ?? [];
+	});
+}
+
+export function setShortcutInTray(uid: string, id: string, inTray: boolean): Promise<FolderShortcut[]> {
+	if (!isUid(uid)) return Promise.resolve([]);
+	return enqueue(async () => {
+		const file = await readFile();
+		const current = file.shortcuts[uid] ?? [];
+		file.shortcuts[uid] = current.map((item) => (item.id === id ? { ...item, inTray } : item));
 		await writeFile(file);
 		announce();
 		return file.shortcuts[uid] ?? [];

@@ -126,6 +126,17 @@ export async function pickLocalFolder(title: string): Promise<string | null> {
 	return typeof result === 'string' ? result : null;
 }
 
+/** Opens a local folder in the system file manager. */
+export async function openLocalPath(path: string): Promise<void> {
+	if (!isTauri()) return;
+	await invoke('open_local_folder', { path });
+}
+
+export async function setTrayShortcuts(shortcuts: { id: string; name: string }[]): Promise<void> {
+	if (!isTauri()) return;
+	await invoke('set_tray_shortcuts', { shortcuts });
+}
+
 export async function revealLocalPath(path: string): Promise<void> {
 	if (!isTauri()) return;
 	const { revealItemInDir } = await import('@tauri-apps/plugin-opener');

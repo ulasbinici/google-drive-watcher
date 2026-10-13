@@ -17,39 +17,52 @@
 		<div class="card-header">
 			<h2 id="shortcuts-heading">Shortcuts</h2>
 		</div>
-			<ul>
-				{#each app.shortcuts as shortcut (shortcut.id)}
-					<li>
-						<div class="top">
-							<button
-								type="button"
-								class="open"
-								title={shortcut.location}
-								onclick={() => void app.openShortcut(shortcut)}
-							>
-								<Icon name="folder" size={18} />
-								<span class="copy">
-									<span class="name">{shortcut.name}</span>
-									{#if shortcut.location}
-										<span class="location">{shortcut.location}</span>
-									{/if}
-								</span>
-							</button>
-							<button
-								type="button"
-								class="remove"
-								aria-label="Remove shortcut"
-								onclick={() => void app.removeShortcut(shortcut.id)}
-							>
-								<Icon name="close" size={14} />
-							</button>
-						</div>
-						<a href={shortcutDriveUrl(shortcut)} onclick={(event) => openDrive(event, shortcut)}>
-							Open in Google Drive
-						</a>
-					</li>
-				{/each}
-			</ul>
+		<ul>
+			{#each app.shortcuts as shortcut (shortcut.id)}
+				<li>
+					<label class="tray" title={shortcut.inTray ? 'Shown in the tray menu' : 'Show in the tray menu'}>
+						<input
+							type="checkbox"
+							checked={shortcut.inTray}
+							aria-label={shortcut.inTray
+								? `Remove ${shortcut.name} from the tray menu`
+								: `Show ${shortcut.name} in the tray menu`}
+							onchange={(event) => {
+								const input = event.currentTarget;
+								if (input instanceof HTMLInputElement) {
+									void app.setShortcutInTray(shortcut.id, input.checked);
+								}
+							}}
+						/>
+					</label>
+					<button
+						type="button"
+						class="open"
+						title={shortcut.location || shortcut.name}
+						onclick={() => void app.openShortcut(shortcut)}
+					>
+						<Icon name="folder" size={15} />
+						<span class="name">{shortcut.name}</span>
+					</button>
+					<a
+						href={shortcutDriveUrl(shortcut)}
+						title="Open in Google Drive"
+						aria-label="Open {shortcut.name} in Google Drive"
+						onclick={(event) => openDrive(event, shortcut)}
+					>
+						<Icon name="external" size={14} />
+					</a>
+					<button
+						type="button"
+						class="remove"
+						aria-label="Remove shortcut {shortcut.name}"
+						onclick={() => void app.removeShortcut(shortcut.id)}
+					>
+						<Icon name="close" size={13} />
+					</button>
+				</li>
+			{/each}
+		</ul>
 	</section>
 {/if}
 
@@ -60,91 +73,86 @@
 	}
 
 	ul {
+		box-sizing: border-box;
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.6rem;
-		max-height: 11.5rem;
+		align-content: flex-start;
+		gap: 0.4rem;
+		/* Two chip rows, then the list scrolls. One row stays one row tall. */
+		max-height: calc(2 * 1.85rem + 0.4rem + 1rem);
 		margin: 0;
-		padding: 0.85rem 1rem 1rem;
-		overflow: auto;
+		padding: 0.15rem 1rem 0.85rem;
+		overflow-x: hidden;
+		overflow-y: auto;
 		list-style: none;
 	}
 
 	li {
 		display: flex;
-		flex-direction: column;
-		gap: 0.2rem;
-		width: min(100%, 16rem);
-		min-width: 0;
-		padding: 0.45rem 0.45rem 0.45rem 0.55rem;
+		flex: 0 1 auto;
+		align-items: center;
+		gap: 0.15rem;
+		height: 1.85rem;
+		max-width: 100%;
+		padding: 0 0.15rem 0 0.4rem;
 		border: 1px solid var(--border);
-		border-radius: var(--radius-sm);
+		border-radius: 999px;
 		background: var(--surface-2);
 	}
 
-	.top {
-		display: flex;
-		align-items: flex-start;
-		gap: 0.25rem;
+	.tray {
+		display: grid;
+		flex: none;
+		place-items: center;
+	}
+
+	.tray input {
+		width: 0.85rem;
+		height: 0.85rem;
+		margin: 0;
+		accent-color: var(--accent);
+		cursor: pointer;
 	}
 
 	.open {
 		display: flex;
-		align-items: flex-start;
-		gap: 0.45rem;
-		width: 100%;
-		padding: 0;
+		align-items: center;
+		gap: 0.35rem;
+		min-width: 0;
+		max-width: 14rem;
+		padding: 0 0.15rem;
 		border: 0;
 		background: transparent;
 		color: inherit;
-		text-align: left;
+		font: inherit;
 		cursor: pointer;
-	}
-
-	.copy {
-		display: flex;
-		flex: 1;
-		flex-direction: column;
-		min-width: 0;
 	}
 
 	.name {
 		overflow: hidden;
+		font-size: 0.82rem;
 		font-weight: 600;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
 
-	.location {
-		overflow: hidden;
-		color: var(--text-muted);
-		font-size: 0.75rem;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	a {
-		align-self: flex-start;
-		margin-left: 1.6rem;
-		color: var(--accent);
-		font-size: 0.75rem;
-		text-decoration: none;
-	}
-
-	a:hover {
-		text-decoration: underline;
-	}
-
+	a,
 	.remove {
+		display: grid;
 		flex: none;
-		padding: 0.15rem;
+		place-items: center;
+		width: 1.45rem;
+		height: 1.45rem;
+		padding: 0;
 		border: 0;
 		border-radius: 999px;
 		background: transparent;
 		color: var(--text-muted);
+		text-decoration: none;
 		cursor: pointer;
 	}
 
+	a:hover,
 	.remove:hover {
 		background: var(--surface-hover);
 		color: var(--text);

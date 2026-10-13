@@ -2,7 +2,7 @@ import { createContext } from 'svelte';
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import { invalidateDriveToken } from '$lib/drive/drive-api';
 import { errorMessage } from '$lib/format';
-import { APP_EVENTS, emitAppEvent, openBrowseWindow, setTrayMonitoring } from '$lib/native';
+import { APP_EVENTS, emitAppEvent, openBrowseWindow, setTrayMonitoring, setTrayShortcuts } from '$lib/native';
 import { requestIncrementalSync } from '$lib/sync/sync-store';
 import type { DriveNotifierBackend, Unsubscribe } from '$lib/services';
 import {
@@ -17,6 +17,7 @@ import {
 	listenFolderShortcuts,
 	loadFolderShortcuts,
 	removeFolderShortcut,
+	setShortcutInTray,
 	stageShortcutOpen,
 	type FolderShortcut
 } from '$lib/state/folder-shortcuts';
@@ -227,6 +228,7 @@ export class AppState {
 		this.syncError = null;
 		this.notifications = { status: 'idle' };
 		this.shortcuts = [];
+		void setTrayShortcuts([]);
 		this.#meta = {};
 		this.#metaUid = null;
 		this.#metaReady = false;
@@ -521,12 +523,30 @@ export class AppState {
 		const list = await loadFolderShortcuts(uid).catch(() => null);
 		if (!list || this.user?.uid !== uid) return;
 		this.shortcuts = list;
+		await this.#syncTrayShortcuts();
+	}
+
+	async setShortcutInTray(id: string, inTray: boolean) {
+		const uid = this.user?.uid;
+		if (!uid) return;
+		this.shortcuts = await setShortcutInTray(uid, id, inTray);
+		await this.#syncTrayShortcuts();
 	}
 
 	async removeShortcut(id: string) {
 		const uid = this.user?.uid;
 		if (!uid) return;
 		this.shortcuts = await removeFolderShortcut(uid, id);
+		await this.#syncTrayShortcuts();
+	}
+
+	async #syncTrayShortcuts() {
+		await setTrayShortcuts(
+			this.shortcuts.filter((shortcut) => shortcut.inTray).map((shortcut) => ({
+				id: shortcut.id,
+				name: shortcut.name
+			}))
+		).catch(() => undefined);
 	}
 
 	async openShortcut(shortcut: FolderShortcut) {

@@ -1,9 +1,7 @@
 <script lang="ts">
-	import { isTauri } from '$lib/native';
 	import { createBackend } from '$lib/services';
 	import { AppState, setAppState } from '$lib/state/app-state.svelte';
 	import FolderTree from './FolderTree.svelte';
-	import Icon from './Icon.svelte';
 	import SelectionBar from './SelectionBar.svelte';
 	import SignInPanel from './SignInPanel.svelte';
 	import StatusBlock from './StatusBlock.svelte';
@@ -17,15 +15,6 @@
 	$effect(() => stop);
 
 	const signedIn = $derived(app.authStatus === 'signed-in' || app.authStatus === 'signing-out');
-
-	async function closeWindow() {
-		if (!isTauri()) {
-			window.close();
-			return;
-		}
-		const { getCurrentWindow } = await import('@tauri-apps/api/window');
-		await getCurrentWindow().close();
-	}
 </script>
 
 <div class="shell">
@@ -34,10 +23,6 @@
 			<h1>Watch</h1>
 			<p class="muted">Choose which Drive folders to watch</p>
 		</div>
-		<button type="button" class="btn btn-sm" onclick={() => void closeWindow()}>
-			<Icon name="close" size={15} />
-			Close
-		</button>
 	</header>
 
 	{#if app.authStatus === 'initializing'}

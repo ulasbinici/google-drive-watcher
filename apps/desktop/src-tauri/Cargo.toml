@@ -1,6 +1,6 @@
 [package]
 name = "drive-watch-desktop"
-version = "1.0.9"
+version = "1.0.11"
 description = "Cross-platform Google Drive folder change notifier"
 authors = ["Drive Watch contributors"]
 edition = "2024"

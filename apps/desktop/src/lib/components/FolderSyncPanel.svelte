@@ -143,15 +143,6 @@
 					</li>
 				{/each}
 			</ul>
-			<p class="muted note">
-				{#if sync.mirrorDeletes}
-					Deletions follow each folder’s direction. Drive copies go to trash. Google Docs, Sheets and
-					Slides are skipped.
-				{:else}
-					Deleting a file on one side does not delete it on the other. Google Docs, Sheets and Slides
-					are skipped.
-				{/if}
-			</p>
 		{/if}
 	</div>
 </section>
@@ -168,8 +159,7 @@
 		margin-bottom: 0.75rem;
 	}
 
-	.empty,
-	.note {
+	.empty {
 		margin: 0;
 		font-size: 0.85rem;
 	}
@@ -258,7 +248,4 @@
 		font-size: 0.78rem;
 	}
 
-	.note {
-		margin-top: 0.7rem;
-	}
 </style>

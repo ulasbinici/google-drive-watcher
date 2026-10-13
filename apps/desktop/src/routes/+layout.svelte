@@ -52,6 +52,10 @@
 					}),
 					listen('tray-sync-now', () => {
 						sync.request(null, true);
+					}),
+					listen<string>('tray-open-shortcut', (event) => {
+						const shortcut = state.shortcuts.find((item) => item.id === event.payload);
+						if (shortcut) void state.openShortcut(shortcut);
 					})
 				]);
 				if (cancelled) {
